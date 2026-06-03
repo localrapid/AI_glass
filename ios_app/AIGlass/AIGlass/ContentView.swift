@@ -193,6 +193,9 @@ struct ContentView: View {
             Text("受信履歴 (\(photos.count))")
                 .font(.subheadline.bold())
             ForEach(photos) { photo in
+              NavigationLink {
+                PhotoDetailView(record: photo, hubURL: settings.hubURL, ble: ble, canCaption: settings.canCaption)
+              } label: {
                 HStack(spacing: 12) {
                     PhotoImageView(record: photo, hubURL: settings.hubURL)
                         .frame(width: 56, height: 56)
@@ -220,6 +223,8 @@ struct ContentView: View {
                             .foregroundStyle(.orange)
                     }
                 }
+              }
+              .buttonStyle(.plain)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -283,20 +288,73 @@ private struct SettingsView: View {
     }
 }
 
+// MARK: - Photo detail (tap a thumbnail to enlarge)
+
+private struct PhotoDetailView: View {
+    let record: PhotoRecord
+    let hubURL: String
+    @ObservedObject var ble: BLEManager
+    let canCaption: Bool
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                PhotoImageView(record: record, hubURL: hubURL, fill: false)
+                    .frame(maxWidth: .infinity)
+                    .frame(maxHeight: 460)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                Text(record.receivedAt, format: .dateTime.year().month().day().hour().minute().second())
+                    .font(.headline)
+
+                // Caption / actions
+                if record.isCaptioning {
+                    HStack(spacing: 8) { ProgressView(); Text("AIが説明を生成中…") }
+                } else if let caption = record.caption {
+                    Text(caption).font(.body)
+                    Button {
+                        ble.requestCaption(for: record.id)
+                    } label: { Label("説明を再生成", systemImage: "arrow.clockwise") }
+                        .buttonStyle(.bordered)
+                        .disabled(!canCaption)
+                } else {
+                    if let error = record.captionError {
+                        Text(error).font(.callout).foregroundStyle(.red)
+                    }
+                    Button {
+                        ble.requestCaption(for: record.id)
+                    } label: { Label("AIで説明を生成", systemImage: "sparkles") }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!canCaption)
+                }
+
+                Divider()
+                Text("\(record.byteCount > 0 ? "\(record.byteCount) bytes ・ " : "ハブ保存 ・ ")\(record.chunkCount) chunks\(record.hadGap ? " ・ ⚠️gap" : "")")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
+        }
+        .navigationTitle("写真")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 /// Shows a photo from the local cache if present, otherwise fetches it from the
 /// hub (for items whose local copy was pruned after 3 days).
 private struct PhotoImageView: View {
     let record: PhotoRecord
     let hubURL: String
+    var fill = true   // true: crop-to-fill (thumbnails); false: fit whole image
 
     var body: some View {
         Group {
             if let img = record.image {
-                Image(uiImage: img).resizable().scaledToFill()
+                styled(Image(uiImage: img))
             } else if let jid = record.hubJobID, let url = URL(string: "\(hubURL)/jobs/\(jid)/image") {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
-                        image.resizable().scaledToFill()
+                        styled(image)
                     } else if phase.error != nil {
                         placeholder("icloud.slash")        // hub unreachable
                     } else {
@@ -307,6 +365,10 @@ private struct PhotoImageView: View {
                 placeholder("photo")
             }
         }
+    }
+
+    private func styled(_ image: Image) -> some View {
+        image.resizable().aspectRatio(contentMode: fill ? .fill : .fit)
     }
 
     private func placeholder(_ symbol: String) -> some View {
