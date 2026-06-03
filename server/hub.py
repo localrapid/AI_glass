@@ -23,6 +23,7 @@ import time
 import uuid
 import sqlite3
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException
 from fastapi.responses import FileResponse
@@ -56,7 +57,7 @@ def db() -> sqlite3.Connection:
 app = FastAPI(title="AI_glass hub")
 
 
-def check(auth: str | None) -> None:
+def check(auth: Optional[str]) -> None:
     if TOKEN and auth != f"Bearer {TOKEN}":
         raise HTTPException(status_code=401, detail="bad or missing token")
 
@@ -72,7 +73,7 @@ def health():
 async def create_job(
     image: UploadFile = File(...),
     kind: str = Form("caption"),
-    authorization: str | None = Header(None),
+    authorization: Optional[str] = Header(None),
 ):
     check(authorization)
     jid = uuid.uuid4().hex
@@ -89,7 +90,7 @@ async def create_job(
 
 
 @app.get("/jobs/{jid}")
-def get_job(jid: str, authorization: str | None = Header(None)):
+def get_job(jid: str, authorization: Optional[str] = Header(None)):
     check(authorization)
     con = db()
     row = con.execute(
@@ -103,7 +104,7 @@ def get_job(jid: str, authorization: str | None = Header(None)):
 
 
 @app.get("/jobs")
-def list_jobs(limit: int = 50, authorization: str | None = Header(None)):
+def list_jobs(limit: int = 50, authorization: Optional[str] = Header(None)):
     check(authorization)
     con = db()
     rows = con.execute(
@@ -118,7 +119,7 @@ def list_jobs(limit: int = 50, authorization: str | None = Header(None)):
 # --- 4090 worker <-> hub (outbound from the worker) ------------------------
 
 @app.get("/jobs/next/claim")
-def claim_next(authorization: str | None = Header(None)):
+def claim_next(authorization: Optional[str] = Header(None)):
     """Worker pulls the oldest pending job and marks it processing. {} if none."""
     check(authorization)
     con = db()
@@ -136,7 +137,7 @@ def claim_next(authorization: str | None = Header(None)):
 
 
 @app.get("/jobs/{jid}/image")
-def get_image(jid: str, authorization: str | None = Header(None)):
+def get_image(jid: str, authorization: Optional[str] = Header(None)):
     check(authorization)
     p = MEDIA / f"{jid}.jpg"
     if not p.exists():
@@ -145,7 +146,7 @@ def get_image(jid: str, authorization: str | None = Header(None)):
 
 
 @app.post("/jobs/{jid}/result")
-async def post_result(jid: str, payload: dict, authorization: str | None = Header(None)):
+async def post_result(jid: str, payload: dict, authorization: Optional[str] = Header(None)):
     check(authorization)
     con = db()
     if payload.get("error"):
