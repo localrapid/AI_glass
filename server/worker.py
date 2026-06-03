@@ -24,6 +24,7 @@ import os
 import json
 import time
 import base64
+import tempfile
 import urllib.request
 import urllib.error
 
@@ -39,6 +40,12 @@ OLLAMA = _normalize(os.environ.get("OLLAMA_URL", "http://localhost:11434"))
 MODEL = os.environ.get("AIGLASS_MODEL", "qwen3-vl:8b")
 TOKEN = os.environ.get("AIGLASS_TOKEN", "")
 POLL = float(os.environ.get("AIGLASS_POLL", "1.5"))
+# Whisper (audio). Requires `pip install faster-whisper`; loaded lazily so the
+# photo-only path needs no extra deps.
+WHISPER_MODEL = os.environ.get("AIGLASS_WHISPER_MODEL", "large-v3")
+WHISPER_DEVICE = os.environ.get("AIGLASS_WHISPER_DEVICE", "cuda")
+WHISPER_COMPUTE = os.environ.get("AIGLASS_WHISPER_COMPUTE", "float16")
+_whisper = None
 
 AUTH = {"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}
 
@@ -93,6 +100,21 @@ def caption(jpeg: bytes) -> str:
     return _clean(out.get("response") or "")
 
 
+def _load_whisper():
+    global _whisper
+    if _whisper is None:
+        from faster_whisper import WhisperModel  # lazy import
+        print(f"[worker] loading Whisper {WHISPER_MODEL} ({WHISPER_DEVICE}/{WHISPER_COMPUTE})…")
+        _whisper = WhisperModel(WHISPER_MODEL, device=WHISPER_DEVICE, compute_type=WHISPER_COMPUTE)
+    return _whisper
+
+
+def transcribe(wav_path: str) -> str:
+    model = _load_whisper()
+    segments, _info = model.transcribe(wav_path, language="ja", vad_filter=True)
+    return "".join(seg.text for seg in segments).strip()
+
+
 def main():
     print(f"[worker] hub={HUB} ollama={OLLAMA} model={MODEL} auth={'on' if TOKEN else 'off'}")
     # Fail fast if Ollama isn't reachable.
@@ -115,10 +137,24 @@ def main():
             continue
 
         jid = job["id"]
-        print(f"[worker] job {jid} ({job.get('kind')})")
+        kind = job.get("kind")
+        print(f"[worker] job {jid} ({kind})")
         try:
-            img = _get_bytes(f"{HUB}/jobs/{jid}/image")
-            text = caption(img)
+            if kind == "transcribe":
+                wav = _get_bytes(f"{HUB}/jobs/{jid}/audio")
+                tmp = os.path.join(tempfile.gettempdir(), f"aiglass_{jid}.wav")
+                with open(tmp, "wb") as f:
+                    f.write(wav)
+                try:
+                    text = transcribe(tmp)
+                finally:
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
+            else:
+                img = _get_bytes(f"{HUB}/jobs/{jid}/image")
+                text = caption(img)
             _post_json(f"{HUB}/jobs/{jid}/result", {"result": text})
             print(f"[worker]   -> {text[:70]}")
         except Exception as e:

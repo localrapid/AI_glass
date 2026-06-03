@@ -17,6 +17,7 @@ struct ContentView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \PhotoRecord.receivedAt, order: .reverse) private var photos: [PhotoRecord]
+    @Query(sort: \TranscriptRecord.receivedAt, order: .reverse) private var transcripts: [TranscriptRecord]
 
     var body: some View {
         NavigationStack {
@@ -25,6 +26,7 @@ struct ContentView: View {
                     statusCard
                     latestImageCard
                     controlCard
+                    transcriptsList
                     historyList
                 }
                 .padding()
@@ -178,12 +180,58 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .frame(maxWidth: .infinity)
+
+            Divider()
+            Button {
+                ble.recordAudio(seconds: 5)
+            } label: {
+                Label("録音して文字起こし（5秒）", systemImage: "mic.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
         }
         .padding()
         .frame(maxWidth: .infinity)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
         .disabled(ble.state != .connected)
         .opacity(ble.state == .connected ? 1 : 0.5)
+    }
+
+    // MARK: Transcripts (Phase 2 audio)
+
+    @ViewBuilder
+    private var transcriptsList: some View {
+        if !transcripts.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("文字起こし (\(transcripts.count))")
+                    .font(.subheadline.bold())
+                ForEach(transcripts) { t in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "waveform")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(t.receivedAt, format: .dateTime.hour().minute().second())
+                                .font(.caption).foregroundStyle(.secondary)
+                            if t.isTranscribing {
+                                HStack(spacing: 6) { ProgressView(); Text("文字起こし中…").font(.callout) }
+                            } else if let text = t.transcript, !text.isEmpty {
+                                Text(text).font(.callout)
+                            } else if let err = t.error {
+                                Text(err).font(.caption).foregroundStyle(.red)
+                            } else {
+                                Text("（無音）").font(.callout).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        }
     }
 
     // MARK: History

@@ -14,6 +14,13 @@ bool bleIsConnected();
 // counter prefix, terminated by a PHOTO_EOF_MARKER packet.
 void blePhotoSend(const uint8_t* jpeg, size_t length);
 
+// Audio data path (Phase 2). Streams PCM over Audio Data using the same
+// counter-prefixed chunk format as photos. The app reassembles and wraps it
+// in a WAV header. bleConsumeAudioRequest() returns the requested clip length
+// in seconds once after an Audio Control write, else 0.
+void bleAudioSend(const uint8_t* pcm, size_t length);
+uint8_t bleConsumeAudioRequest();
+
 // Touch events fire on TTP223 rising edge (configured in touch_input).
 enum TouchEventType : uint8_t {
   TOUCH_EVENT_TAP        = 0x01,

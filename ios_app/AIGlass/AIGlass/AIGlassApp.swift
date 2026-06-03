@@ -12,6 +12,6 @@ struct AIGlassApp: App {
         WindowGroup {
             ContentView()
         }
-        .modelContainer(for: PhotoRecord.self)
+        .modelContainer(for: [PhotoRecord.self, TranscriptRecord.self])
     }
 }

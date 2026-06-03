@@ -62,8 +62,22 @@ Set the same `AIGLASS_TOKEN` on the hub, the worker, and (later) the iOS app to
 require `Authorization: Bearer <token>`. The tailnet is already private, so this
 is optional hardening.
 
+## Audio (Phase 2)
+
+The same job queue handles audio. The iPhone records a clip via the glasses,
+uploads it as `kind=transcribe` (a WAV), and the worker runs **faster-whisper**
+on the 4090. Install it once on the PC:
+
+```bash
+pip install faster-whisper      # pulls CUDA libs; first run downloads the model
+```
+
+Env vars (worker): `AIGLASS_WHISPER_MODEL` (default `large-v3`),
+`AIGLASS_WHISPER_DEVICE` (`cuda`), `AIGLASS_WHISPER_COMPUTE` (`float16`).
+The worker now claims both `caption` and `transcribe` jobs.
+
 ## Future
 
-The same hub/worker pattern extends to audio (Whisper) and faces (InsightFace +
-a vector table); `kind` on a job selects the pipeline. Captions/transcripts/face
-matches accumulate in the hub DB and feed the on-device companion chat (RAG).
+Faces (InsightFace + a vector table) follow the same `kind`-selects-pipeline
+pattern. Captions/transcripts/face matches accumulate in the hub DB and feed the
+on-device companion chat (RAG).

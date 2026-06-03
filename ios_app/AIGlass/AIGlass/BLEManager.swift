@@ -45,12 +45,18 @@ final class BLEManager: NSObject, ObservableObject {
     private var central: CBCentralManager!
     private var glass: CBPeripheral?
     private var photoControlChar: CBCharacteristic?
+    private var audioControlChar: CBCharacteristic?
 
-    // MARK: Frame reassembly state
+    // MARK: Photo frame reassembly state
     private var frameBuffer = Data()
     private var lastCounter = -1
     private var chunkCount = 0
     private var hadGap = false
+
+    // MARK: Audio clip reassembly state (same chunk wire format)
+    private var audioBuffer = Data()
+    private var audioLastCounter = -1
+    private var audioRecordID: UUID?
 
     // MARK: Captioning
     struct CaptionSettings {
@@ -96,6 +102,26 @@ final class BLEManager: NSObject, ObservableObject {
         let data = Data(bytes: &value, count: 1)
         glass.writeValue(data, for: char, type: .withResponse)
         log("Photo Control <- \(command)")
+    }
+
+    /// Ask the glasses to record an N-second audio clip (Phase 2).
+    func recordAudio(seconds: UInt8 = AudioProtocol.defaultSeconds) {
+        guard let glass, let char = audioControlChar else {
+            log("audio record skipped: not connected")
+            return
+        }
+        guard let context = modelContext else { return }
+        // Pre-create the record so the UI shows "recording…" immediately.
+        let rec = TranscriptRecord(receivedAt: Date(), seconds: Int(seconds))
+        context.insert(rec)
+        try? context.save()
+        audioRecordID = rec.id
+        audioBuffer.removeAll(keepingCapacity: true)
+        audioLastCounter = -1
+
+        var value = seconds
+        glass.writeValue(Data(bytes: &value, count: 1), for: char, type: .withResponse)
+        log("Audio Control <- record \(seconds)s")
     }
 
     // MARK: Reassembly
@@ -304,6 +330,81 @@ final class BLEManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: Audio reassembly -> WAV -> hub transcribe
+
+    private func ingestAudio(_ packet: Data) {
+        guard packet.count >= PhotoProtocol.headerSize else { return }
+        let counter = UInt16(packet[0]) | (UInt16(packet[1]) << 8)
+        if counter == PhotoProtocol.endOfFrameMarker {
+            finalizeAudio()
+            return
+        }
+        audioLastCounter = Int(counter)
+        audioBuffer.append(packet.suffix(from: PhotoProtocol.headerSize))
+    }
+
+    private func finalizeAudio() {
+        let pcm = audioBuffer
+        audioBuffer.removeAll(keepingCapacity: true)
+        audioLastCounter = -1
+        guard let id = audioRecordID else { return }
+        audioRecordID = nil
+
+        guard !pcm.isEmpty else {
+            updateTranscript(id) { $0.isTranscribing = false; $0.error = "音声が空でした" }
+            return
+        }
+        log("🎤 audio \(pcm.count) bytes received")
+
+        let cfg = captionConfig()
+        guard cfg.useHub, !cfg.hubURL.isEmpty else {
+            updateTranscript(id) { $0.isTranscribing = false; $0.error = "ローカルハブが未設定です" }
+            return
+        }
+        let wav = Self.makeWAV(pcm: pcm, sampleRate: AudioProtocol.sampleRate, bits: AudioProtocol.bitsPerSample)
+        let hub = HubCaptionService.Config(baseURL: cfg.hubURL, token: cfg.hubToken)
+        Task {
+            do {
+                let jid = try await HubCaptionService.upload(jpeg: wav, kind: "transcribe", config: hub)
+                updateTranscript(id) { $0.hubJobID = jid }
+                let text = try await HubCaptionService.result(jobID: jid, config: hub, timeout: 180)
+                updateTranscript(id) { $0.transcript = text; $0.isTranscribing = false }
+                log("📝 transcript ok")
+            } catch {
+                let m = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                updateTranscript(id) { $0.error = m; $0.isTranscribing = false }
+                log("📝 transcript failed: \(m)")
+            }
+        }
+    }
+
+    private func updateTranscript(_ id: UUID, _ mutate: (TranscriptRecord) -> Void) {
+        guard let context = modelContext else { return }
+        let d = FetchDescriptor<TranscriptRecord>(predicate: #Predicate { $0.id == id })
+        if let r = try? context.fetch(d).first {
+            mutate(r)
+            try? context.save()
+        }
+    }
+
+    /// Wrap raw PCM in a minimal 44-byte WAV header for Whisper.
+    static func makeWAV(pcm: Data, sampleRate: UInt32, bits: UInt16, channels: UInt16 = 1) -> Data {
+        let byteRate = sampleRate * UInt32(channels) * UInt32(bits / 8)
+        let blockAlign = channels * (bits / 8)
+        let dataLen = UInt32(pcm.count)
+        var h = Data()
+        func ascii(_ s: String) { h.append(s.data(using: .ascii)!) }
+        func le32(_ v: UInt32) { var x = v.littleEndian; h.append(Data(bytes: &x, count: 4)) }
+        func le16(_ v: UInt16) { var x = v.littleEndian; h.append(Data(bytes: &x, count: 2)) }
+        ascii("RIFF"); le32(36 + dataLen); ascii("WAVE")
+        ascii("fmt "); le32(16); le16(1); le16(channels)
+        le32(sampleRate); le32(byteRate); le16(blockAlign); le16(bits)
+        ascii("data"); le32(dataLen)
+        var out = h
+        out.append(pcm)
+        return out
+    }
+
     private func log(_ message: String) {
         lastLog = message
         print("[BLE] \(message)")
@@ -381,7 +482,8 @@ extension BLEManager: CBPeripheralDelegate {
                 return
             }
             peripheral.discoverCharacteristics(
-                [GlassUUID.photoData, GlassUUID.photoControl, GlassUUID.touchEvent, GlassUUID.status],
+                [GlassUUID.photoData, GlassUUID.photoControl, GlassUUID.touchEvent,
+                 GlassUUID.status, GlassUUID.audioData, GlassUUID.audioControl],
                 for: service
             )
         }
@@ -400,6 +502,11 @@ extension BLEManager: CBPeripheralDelegate {
                     photoControlChar = char
                     // Kick off auto-capture at the default interval.
                     sendControl(PhotoControlCommand.defaultInterval)
+                case GlassUUID.audioData:
+                    peripheral.setNotifyValue(true, for: char)
+                    log("subscribed to Audio Data")
+                case GlassUUID.audioControl:
+                    audioControlChar = char
                 case GlassUUID.touchEvent, GlassUUID.status:
                     peripheral.setNotifyValue(true, for: char)
                 default:
@@ -417,6 +524,8 @@ extension BLEManager: CBPeripheralDelegate {
             switch characteristic.uuid {
             case GlassUUID.photoData:
                 ingest(value)
+            case GlassUUID.audioData:
+                ingestAudio(value)
             case GlassUUID.touchEvent:
                 log("touch event \(Array(value))")
             case GlassUUID.status:

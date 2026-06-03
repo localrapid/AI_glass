@@ -77,7 +77,8 @@ async def create_job(
 ):
     check(authorization)
     jid = uuid.uuid4().hex
-    (MEDIA / f"{jid}.jpg").write_bytes(await image.read())
+    ext = "wav" if kind == "transcribe" else "jpg"
+    (MEDIA / f"{jid}.{ext}").write_bytes(await image.read())
     now = time.time()
     # kind == "store": keep the image but don't queue it for captioning
     # (the iPhone uploads every photo for storage; captioning is opt-in).
@@ -141,7 +142,7 @@ def claim_next(authorization: Optional[str] = Header(None)):
     check(authorization)
     con = db()
     row = con.execute(
-        "SELECT id,kind FROM jobs WHERE status='pending' AND kind='caption' ORDER BY created LIMIT 1"
+        "SELECT id,kind FROM jobs WHERE status='pending' AND kind IN ('caption','transcribe') ORDER BY created LIMIT 1"
     ).fetchone()
     if not row:
         con.close()
@@ -160,6 +161,15 @@ def get_image(jid: str, authorization: Optional[str] = Header(None)):
     if not p.exists():
         raise HTTPException(404, "no image")
     return FileResponse(p, media_type="image/jpeg")
+
+
+@app.get("/jobs/{jid}/audio")
+def get_audio(jid: str, authorization: Optional[str] = Header(None)):
+    check(authorization)
+    p = MEDIA / f"{jid}.wav"
+    if not p.exists():
+        raise HTTPException(404, "no audio")
+    return FileResponse(p, media_type="audio/wav")
 
 
 @app.post("/jobs/{jid}/result")

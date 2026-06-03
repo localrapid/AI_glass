@@ -26,12 +26,15 @@ bool g_connected = false;
 // keeps the loop from caching them.
 volatile unsigned long g_capture_interval_ms = (unsigned long)DEFAULT_PHOTO_INTERVAL_S * 1000UL;
 volatile bool          g_capture_once        = false;
+volatile uint8_t       g_audio_request_s     = 0;   // seconds to record, 0 = none
 
 BLEServer*         g_server        = nullptr;
 BLECharacteristic* g_photo_data    = nullptr;
 BLECharacteristic* g_photo_control = nullptr;
 BLECharacteristic* g_touch_event   = nullptr;
 BLECharacteristic* g_status        = nullptr;
+BLECharacteristic* g_audio_data    = nullptr;
+BLECharacteristic* g_audio_control = nullptr;
 
 class ServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer*) override {
@@ -64,6 +67,20 @@ class PhotoControlCallbacks : public BLECharacteristicCallbacks {
     } else if (cmd >= MIN_PHOTO_INTERVAL_S && cmd <= MAX_PHOTO_INTERVAL_S) {
       g_capture_interval_ms = (unsigned long)cmd * 1000UL;
     }
+  }
+};
+
+class AudioControlCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic* characteristic) override {
+    std::string value = characteristic->getValue();
+    if (value.empty()) return;
+    uint8_t seconds = static_cast<uint8_t>(value[0]);
+    if (seconds == 0) seconds = AUDIO_DEFAULT_SECONDS;
+    if (seconds > AUDIO_MAX_SECONDS) seconds = AUDIO_MAX_SECONDS;
+    g_audio_request_s = seconds;
+    Serial.print(F("[BLE] Audio Control: record "));
+    Serial.print(seconds);
+    Serial.println(F("s"));
   }
 };
 
@@ -125,6 +142,18 @@ void bleSetup() {
   uint8_t initial_status = 0;
   g_status->setValue(&initial_status, 1);
 
+  // Audio Data — READ + NOTIFY (chunked PCM, same wire format as photos)
+  g_audio_data = service->createCharacteristic(
+      BLE_AUDIO_DATA_UUID,
+      BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+  g_audio_data->addDescriptor(new BLE2902());
+
+  // Audio Control — WRITE (1 byte = seconds to record)
+  g_audio_control = service->createCharacteristic(
+      BLE_AUDIO_CONTROL_UUID,
+      BLECharacteristic::PROPERTY_WRITE);
+  g_audio_control->setCallbacks(new AudioControlCallbacks());
+
   service->start();
 
   addDeviceInformationService(g_server);
@@ -157,44 +186,56 @@ bool bleConsumeCaptureOnce() {
 
 // --- Notify helpers ---------------------------------------------------------
 
-void blePhotoSend(const uint8_t* jpeg, size_t length) {
-  if (!g_photo_data || !g_connected || !jpeg || length == 0) return;
-
-  // Wire format (matches OpenGlass): each notify packet is
-  //   [counter_LSB][counter_MSB][up to PHOTO_CHUNK_SIZE JPEG bytes]
-  // followed by a final terminator packet whose counter == PHOTO_EOF_MARKER
-  // and which carries no payload. The iOS side reassembles by counter order.
+namespace {
+// Stream a buffer over `ch` as counter-prefixed chunks, terminated by an empty
+// PHOTO_EOF_MARKER packet. Shared by photo and audio paths.
+//   [counter_LSB][counter_MSB][up to PHOTO_CHUNK_SIZE payload bytes]
+uint16_t chunkSend(BLECharacteristic* ch, const uint8_t* data, size_t length) {
   uint8_t packet[PHOTO_HEADER_SIZE + PHOTO_CHUNK_SIZE];
   uint16_t counter = 0;
-
   for (size_t offset = 0; offset < length; offset += PHOTO_CHUNK_SIZE) {
     size_t chunk = length - offset;
     if (chunk > PHOTO_CHUNK_SIZE) chunk = PHOTO_CHUNK_SIZE;
-
     packet[0] = counter & 0xFF;
     packet[1] = (counter >> 8) & 0xFF;
-    memcpy(packet + PHOTO_HEADER_SIZE, jpeg + offset, chunk);
-
-    g_photo_data->setValue(packet, PHOTO_HEADER_SIZE + chunk);
-    g_photo_data->notify();
+    memcpy(packet + PHOTO_HEADER_SIZE, data + offset, chunk);
+    ch->setValue(packet, PHOTO_HEADER_SIZE + chunk);
+    ch->notify();
     counter++;
-
-    // Pace notifies so the controller's TX buffer doesn't overflow and drop
-    // chunks. ~3ms/packet keeps a 60KB frame under ~1s.
-    delay(3);
+    delay(3);  // pace notifies so the controller TX buffer doesn't overflow
   }
-
-  // End-of-frame: counter == 0xFFFF, empty payload.
   packet[0] = PHOTO_EOF_MARKER & 0xFF;
   packet[1] = (PHOTO_EOF_MARKER >> 8) & 0xFF;
-  g_photo_data->setValue(packet, PHOTO_HEADER_SIZE);
-  g_photo_data->notify();
+  ch->setValue(packet, PHOTO_HEADER_SIZE);
+  ch->notify();
+  return counter;
+}
+}  // namespace
 
+void blePhotoSend(const uint8_t* jpeg, size_t length) {
+  if (!g_photo_data || !g_connected || !jpeg || length == 0) return;
+  uint16_t chunks = chunkSend(g_photo_data, jpeg, length);
   Serial.print(F("[BLE] photo sent: "));
   Serial.print(length);
   Serial.print(F(" bytes in "));
-  Serial.print(counter);
+  Serial.print(chunks);
   Serial.println(F(" chunks"));
+}
+
+void bleAudioSend(const uint8_t* pcm, size_t length) {
+  if (!g_audio_data || !g_connected || !pcm || length == 0) return;
+  uint16_t chunks = chunkSend(g_audio_data, pcm, length);
+  Serial.print(F("[BLE] audio sent: "));
+  Serial.print(length);
+  Serial.print(F(" bytes in "));
+  Serial.print(chunks);
+  Serial.println(F(" chunks"));
+}
+
+uint8_t bleConsumeAudioRequest() {
+  uint8_t s = g_audio_request_s;
+  if (s) g_audio_request_s = 0;
+  return s;
 }
 
 void bleTouchNotify(TouchEventType type, uint16_t duration_ms) {

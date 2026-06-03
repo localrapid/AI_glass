@@ -24,6 +24,15 @@ enum GlassUUID {
     static let photoControl = CBUUID(string: "a17ec1a5-0000-4000-8000-000000000003")
     static let touchEvent   = CBUUID(string: "a17ec1a5-0000-4000-8000-000000000004")
     static let status       = CBUUID(string: "a17ec1a5-0000-4000-8000-000000000005")
+    static let audioData    = CBUUID(string: "a17ec1a5-0000-4000-8000-000000000006")
+    static let audioControl = CBUUID(string: "a17ec1a5-0000-4000-8000-000000000008")
+}
+
+enum AudioProtocol {
+    /// PCM format the device records (mono). Used to build the WAV header.
+    nonisolated static let sampleRate: UInt32 = 16000
+    nonisolated static let bitsPerSample: UInt16 = 16
+    nonisolated static let defaultSeconds: UInt8 = 5
 }
 
 enum PhotoProtocol {

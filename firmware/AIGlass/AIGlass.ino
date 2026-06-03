@@ -3,13 +3,12 @@
  * Target board: Seeed XIAO ESP32-S3 Sense (esp32:esp32:XIAO_ESP32S3)
  *
  * Current step:
- *   Phase 1 step 8 — capture is driven by Photo Control. While a central is
- *   connected the loop captures on the interval set via Photo Control (or a
- *   single shot on the `-1` command) and chunks each JPEG out over Photo Data
- *   notify. Touch input (step 9) is approximated by the app's single-shot
- *   button for now (no TTP223 hardware wired yet).
+ *   Phase 2 (audio) — photos work as in Phase 1 (Photo Control schedules
+ *   captures, streamed over Photo Data). Added on-demand audio: the app writes
+ *   N seconds to Audio Control, the device records 16kHz PCM from the PDM mic
+ *   and streams it over Audio Data. Touch input (step 9) still stubbed.
  *
- * See ../docs/FIRMWARE_DESIGN.md for the full Phase 1 plan.
+ * See ../docs/FIRMWARE_DESIGN.md for the full plan.
  */
 
 #include <Arduino.h>
@@ -20,6 +19,7 @@
 #include "camera_pins.h"
 #include "ble_protocol.h"
 #include "camera_capture.h"
+#include "audio_capture.h"
 #include "touch_input.h"
 
 void setup() {
@@ -39,6 +39,7 @@ void setup() {
 
   bleSetup();
   cameraSetup();
+  audioSetup();
   // Phase 1 step 9: touchSetup();
 }
 
@@ -75,9 +76,20 @@ void loop() {
         cameraReleaseFrame(fb);
       }
     }
+    // Phase 2: on-demand audio clip requested via Audio Control.
+    const uint8_t rec_s = bleConsumeAudioRequest();
+    if (rec_s > 0) {
+      size_t len = 0;
+      uint8_t* pcm = audioRecord(rec_s, &len);
+      if (pcm) {
+        if (len > 0) bleAudioSend(pcm, len);
+        free(pcm);
+      }
+    }
   } else {
-    // Drop any stale single-shot request queued before disconnect.
+    // Drop any stale requests queued before disconnect.
     bleConsumeCaptureOnce();
+    bleConsumeAudioRequest();
   }
 
   // Phase 1 step 9+: touchLoop();
