@@ -27,8 +27,15 @@ import base64
 import urllib.request
 import urllib.error
 
-HUB = os.environ.get("AIGLASS_HUB", "http://100.76.69.64:8765").rstrip("/")
-OLLAMA = os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+def _normalize(url: str) -> str:
+    url = url.rstrip("/")
+    if not url.startswith(("http://", "https://")):
+        url = "http://" + url  # tolerate AIGLASS_HUB=host:port without a scheme
+    return url
+
+
+HUB = _normalize(os.environ.get("AIGLASS_HUB", "http://100.76.69.64:8765"))
+OLLAMA = _normalize(os.environ.get("OLLAMA_URL", "http://localhost:11434"))
 MODEL = os.environ.get("AIGLASS_MODEL", "qwen2.5vl:7b")
 TOKEN = os.environ.get("AIGLASS_TOKEN", "")
 POLL = float(os.environ.get("AIGLASS_POLL", "1.5"))
