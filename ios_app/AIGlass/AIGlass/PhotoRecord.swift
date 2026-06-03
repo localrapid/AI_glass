@@ -15,8 +15,13 @@ import UIKit
 final class PhotoRecord {
     @Attribute(.unique) var id: UUID
     var receivedAt: Date
-    /// JPEG bytes kept outside the database file (can be tens of KB each).
-    @Attribute(.externalStorage) var jpeg: Data
+    /// Local JPEG copy, kept only for recent photos (last few days). Pruned to
+    /// nil for older ones — the full image then lives on the M1 hub and is
+    /// fetched on demand via `hubJobID`.
+    @Attribute(.externalStorage) var jpeg: Data?
+    /// The hub's job id, used both for captioning and to re-fetch the image
+    /// after the local copy has been pruned.
+    var hubJobID: String?
     var chunkCount: Int
     var hadGap: Bool
 
@@ -24,7 +29,7 @@ final class PhotoRecord {
     var captionError: String?
     var isCaptioning: Bool
 
-    init(id: UUID = UUID(), receivedAt: Date, jpeg: Data, chunkCount: Int, hadGap: Bool) {
+    init(id: UUID = UUID(), receivedAt: Date, jpeg: Data?, chunkCount: Int, hadGap: Bool) {
         self.id = id
         self.receivedAt = receivedAt
         self.jpeg = jpeg
@@ -33,6 +38,8 @@ final class PhotoRecord {
         self.isCaptioning = false
     }
 
-    var image: UIImage? { UIImage(data: jpeg) }
-    var byteCount: Int { jpeg.count }
+    /// Local image if still cached; nil once pruned (fetch from hub instead).
+    var image: UIImage? { jpeg.flatMap(UIImage.init(data:)) }
+    var byteCount: Int { jpeg?.count ?? 0 }
+    var isLocal: Bool { jpeg != nil }
 }

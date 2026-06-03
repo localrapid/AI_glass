@@ -155,10 +155,73 @@ final class BLEManager: NSObject, ObservableObject {
         try? context.save()
         log("✅ photo \(data.count) bytes / \(chunks) chunks\(gap ? " (gap!)" : "")")
 
-        // Auto-caption if enabled and the selected backend is configured.
         let cfg = captionConfig()
-        if cfg.auto && cfg.canCaption {
+        if cfg.useHub && !cfg.hubURL.isEmpty {
+            // Hub is the canonical store: upload every photo. Caption now only
+            // if auto is on; otherwise just store (caption on demand later).
+            uploadToHub(recordID: record.id, jpeg: data, wantCaption: cfg.auto, cfg: cfg)
+        } else if cfg.auto && cfg.canCaption {
+            // Cloud (Claude) mode auto-caption — image stays local.
             requestCaption(for: record.id)
+        }
+
+        pruneOldImages()
+    }
+
+    /// Upload a freshly received photo to the hub (for storage, and optionally
+    /// captioning). Records the hub job id so the local copy can be pruned later.
+    private func uploadToHub(recordID: UUID, jpeg: Data, wantCaption: Bool, cfg: CaptionSettings) {
+        guard let context = modelContext else { return }
+        let hub = HubCaptionService.Config(baseURL: cfg.hubURL, token: cfg.hubToken)
+        if wantCaption, let r = fetchRecord(recordID, context) {
+            r.isCaptioning = true
+            r.captionError = nil
+            try? context.save()
+        }
+        Task {
+            do {
+                let jid = try await HubCaptionService.upload(
+                    jpeg: jpeg, kind: wantCaption ? "caption" : "store", config: hub)
+                if let r = fetchRecord(recordID, context) {
+                    r.hubJobID = jid
+                    try? context.save()
+                }
+                if wantCaption {
+                    let text = try await HubCaptionService.result(jobID: jid, config: hub)
+                    if let r = fetchRecord(recordID, context) {
+                        r.caption = text
+                        r.isCaptioning = false
+                        try? context.save()
+                    }
+                    log("📝 caption ok (hub)")
+                } else {
+                    log("🗄 stored on hub")
+                }
+            } catch {
+                let m = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                if let r = fetchRecord(recordID, context) {
+                    if wantCaption { r.captionError = m }
+                    r.isCaptioning = false
+                    try? context.save()
+                }
+                log("hub upload failed: \(m)")
+            }
+        }
+    }
+
+    /// Drop the local JPEG for photos older than `keepDays` that are safely
+    /// stored on the hub. Captions/metadata stay; the image is re-fetched from
+    /// the hub on demand. Keeps iPhone storage roughly flat.
+    private func pruneOldImages(keepDays: Int = 3) {
+        guard let context = modelContext else { return }
+        let cutoff = Date().addingTimeInterval(-Double(keepDays) * 86_400)
+        let descriptor = FetchDescriptor<PhotoRecord>(
+            predicate: #Predicate { $0.receivedAt < cutoff && $0.jpeg != nil && $0.hubJobID != nil }
+        )
+        if let old = try? context.fetch(descriptor), !old.isEmpty {
+            for r in old { r.jpeg = nil }
+            try? context.save()
+            log("🧹 pruned \(old.count) local image(s) (older than \(keepDays)d)")
         }
     }
 
@@ -173,6 +236,7 @@ final class BLEManager: NSObject, ObservableObject {
             for r in rows { r.isCaptioning = false }
             try? context.save()
         }
+        pruneOldImages()
     }
 
     private func fetchRecord(_ id: UUID, _ context: ModelContext) -> PhotoRecord? {
@@ -190,7 +254,8 @@ final class BLEManager: NSObject, ObservableObject {
               !record.isCaptioning
         else { return }
 
-        let jpeg = record.jpeg
+        let localJPEG = record.jpeg
+        let existingJobID = record.hubJobID
         record.isCaptioning = true
         record.captionError = nil
         try? context.save()
@@ -199,12 +264,27 @@ final class BLEManager: NSObject, ObservableObject {
             do {
                 let text: String
                 if cfg.useHub {
-                    text = try await HubCaptionService.caption(
-                        jpeg: jpeg,
-                        config: .init(baseURL: cfg.hubURL, token: cfg.hubToken)
-                    )
+                    let hub = HubCaptionService.Config(baseURL: cfg.hubURL, token: cfg.hubToken)
+                    let jid: String
+                    if let existing = existingJobID {
+                        // Already on the hub (possibly pruned locally) — re-queue it.
+                        try await HubCaptionService.recaption(jobID: existing, config: hub)
+                        jid = existing
+                    } else if let data = localJPEG {
+                        jid = try await HubCaptionService.upload(jpeg: data, kind: "caption", config: hub)
+                        if let r = fetchRecord(id, context) {
+                            r.hubJobID = jid
+                            try? context.save()
+                        }
+                    } else {
+                        throw HubCaptionService.HubError.jobFailed("画像がローカルにもハブにもありません")
+                    }
+                    text = try await HubCaptionService.result(jobID: jid, config: hub)
                 } else {
-                    text = try await CaptionService.caption(jpeg: jpeg, apiKey: cfg.apiKey)
+                    guard let data = localJPEG else {
+                        throw HubCaptionService.HubError.jobFailed("画像がローカルにありません")
+                    }
+                    text = try await CaptionService.caption(jpeg: data, apiKey: cfg.apiKey)
                 }
                 if let r = fetchRecord(id, context) {
                     r.caption = text

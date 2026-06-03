@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 import uvicorn
 
 DATA = Path(os.environ.get("AIGLASS_DATA", str(Path.home() / "aiglass-hub")))
@@ -79,10 +79,27 @@ async def create_job(
     jid = uuid.uuid4().hex
     (MEDIA / f"{jid}.jpg").write_bytes(await image.read())
     now = time.time()
+    # kind == "store": keep the image but don't queue it for captioning
+    # (the iPhone uploads every photo for storage; captioning is opt-in).
+    status = "stored" if kind == "store" else "pending"
     con = db()
     con.execute(
         "INSERT INTO jobs(id,kind,status,created,updated,result,error) VALUES(?,?,?,?,?,?,?)",
-        (jid, kind, "pending", now, now, None, None),
+        (jid, kind, status, now, now, None, None),
+    )
+    con.commit()
+    con.close()
+    return {"id": jid, "status": status}
+
+
+@app.post("/jobs/{jid}/recaption")
+def recaption(jid: str, authorization: Optional[str] = Header(None)):
+    """Re-queue an already-stored photo for captioning."""
+    check(authorization)
+    con = db()
+    con.execute(
+        "UPDATE jobs SET kind='caption',status='pending',updated=? WHERE id=?",
+        (time.time(), jid),
     )
     con.commit()
     con.close()
@@ -124,7 +141,7 @@ def claim_next(authorization: Optional[str] = Header(None)):
     check(authorization)
     con = db()
     row = con.execute(
-        "SELECT id,kind FROM jobs WHERE status='pending' ORDER BY created LIMIT 1"
+        "SELECT id,kind FROM jobs WHERE status='pending' AND kind='caption' ORDER BY created LIMIT 1"
     ).fetchone()
     if not row:
         con.close()
@@ -162,6 +179,37 @@ async def post_result(jid: str, payload: dict, authorization: Optional[str] = He
     con.commit()
     con.close()
     return {"ok": True}
+
+
+@app.get("/gallery", response_class=HTMLResponse)
+def gallery(limit: int = 100):
+    """Simple browsable page pairing each photo with its caption."""
+    con = db()
+    rows = con.execute(
+        "SELECT id,status,created,result FROM jobs ORDER BY created DESC LIMIT ?", (limit,)
+    ).fetchall()
+    con.close()
+    cards = []
+    for jid, status, created, result in rows:
+        ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(created or 0))
+        cap = (result or ("（未生成）" if status != "done" else "")) or ""
+        cards.append(
+            f'<div class="c"><img loading="lazy" src="/jobs/{jid}/image">'
+            f'<div class="t">{ts} ・ {status}</div><div class="cap">{cap}</div></div>'
+        )
+    html = (
+        "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+        "<title>AI_glass gallery</title><style>"
+        "body{font-family:-apple-system,sans-serif;margin:0;background:#111;color:#eee}"
+        ".g{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;padding:12px}"
+        ".c{background:#1c1c1e;border-radius:12px;overflow:hidden}"
+        ".c img{width:100%;display:block;aspect-ratio:4/3;object-fit:cover}"
+        ".t{font:12px monospace;color:#888;padding:6px 10px 0}"
+        ".cap{padding:4px 10px 10px;font-size:14px;line-height:1.4}"
+        "</style><h2 style=padding:12px>AI_glass gallery</h2>"
+        f"<div class=g>{''.join(cards)}</div>"
+    )
+    return HTMLResponse(html)
 
 
 if __name__ == "__main__":

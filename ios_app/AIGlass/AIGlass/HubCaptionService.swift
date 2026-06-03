@@ -38,13 +38,21 @@ enum HubCaptionService {
 
     /// Submit a photo and wait for the caption. Polls every ~1.2s up to `timeout`.
     static func caption(jpeg: Data, config: Config, timeout: TimeInterval = 90) async throws -> String {
-        let jobID = try await submit(jpeg: jpeg, config: config)
-        return try await waitForResult(jobID: jobID, config: config, timeout: timeout)
+        let jobID = try await upload(jpeg: jpeg, kind: "caption", config: config)
+        return try await result(jobID: jobID, config: config, timeout: timeout)
+    }
+
+    /// Image URL on the hub for an already-uploaded job (used after the local
+    /// copy is pruned). Note: no auth header — fine when the hub has no token.
+    static func imageURL(jobID: String, config: Config) -> URL? {
+        URL(string: "\(config.baseURL)/jobs/\(jobID)/image")
     }
 
     // MARK: - POST /jobs (multipart)
 
-    private static func submit(jpeg: Data, config: Config) async throws -> String {
+    /// Upload a photo to the hub. kind "store" = keep but don't caption;
+    /// kind "caption" = also queue for the worker. Returns the job id.
+    static func upload(jpeg: Data, kind: String, config: Config) async throws -> String {
         guard let url = URL(string: "\(config.baseURL)/jobs") else { throw HubError.badURL }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -54,6 +62,8 @@ enum HubCaptionService {
 
         var body = Data()
         func append(_ s: String) { body.append(s.data(using: .utf8)!) }
+        append("--\(boundary)\r\n")
+        append("Content-Disposition: form-data; name=\"kind\"\r\n\r\n\(kind)\r\n")
         append("--\(boundary)\r\n")
         append("Content-Disposition: form-data; name=\"image\"; filename=\"photo.jpg\"\r\n")
         append("Content-Type: image/jpeg\r\n\r\n")
@@ -70,9 +80,19 @@ enum HubCaptionService {
         return id
     }
 
+    /// Re-queue an already-stored job for captioning.
+    static func recaption(jobID: String, config: Config) async throws {
+        guard let url = URL(string: "\(config.baseURL)/jobs/\(jobID)/recaption") else { throw HubError.badURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        addAuth(&request, config)
+        let (_, response) = try await URLSession.shared.data(for: request)
+        try ensureOK(response)
+    }
+
     // MARK: - GET /jobs/{id} (poll)
 
-    private static func waitForResult(jobID: String, config: Config, timeout: TimeInterval) async throws -> String {
+    static func result(jobID: String, config: Config, timeout: TimeInterval = 90) async throws -> String {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             guard let url = URL(string: "\(config.baseURL)/jobs/\(jobID)") else { throw HubError.badURL }

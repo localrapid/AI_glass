@@ -194,13 +194,9 @@ struct ContentView: View {
                 .font(.subheadline.bold())
             ForEach(photos) { photo in
                 HStack(spacing: 12) {
-                    if let img = photo.image {
-                        Image(uiImage: img)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 56, height: 56)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                    }
+                    PhotoImageView(record: photo, hubURL: settings.hubURL)
+                        .frame(width: 56, height: 56)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(photo.receivedAt, format: .dateTime.hour().minute().second())
                             .font(.callout)
@@ -210,7 +206,9 @@ struct ContentView: View {
                                 .foregroundStyle(.primary)
                                 .lineLimit(2)
                         } else {
-                            Text("\(photo.byteCount) bytes ・ \(photo.chunkCount) chunks")
+                            Text(photo.isLocal
+                                 ? "\(photo.byteCount) bytes ・ \(photo.chunkCount) chunks"
+                                 : "ハブ保存 ・ \(photo.chunkCount) chunks")
                                 .font(.caption.monospaced())
                                 .foregroundStyle(.secondary)
                         }
@@ -281,6 +279,40 @@ private struct SettingsView: View {
                     Button("完了") { dismiss() }
                 }
             }
+        }
+    }
+}
+
+/// Shows a photo from the local cache if present, otherwise fetches it from the
+/// hub (for items whose local copy was pruned after 3 days).
+private struct PhotoImageView: View {
+    let record: PhotoRecord
+    let hubURL: String
+
+    var body: some View {
+        Group {
+            if let img = record.image {
+                Image(uiImage: img).resizable().scaledToFill()
+            } else if let jid = record.hubJobID, let url = URL(string: "\(hubURL)/jobs/\(jid)/image") {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else if phase.error != nil {
+                        placeholder("icloud.slash")        // hub unreachable
+                    } else {
+                        placeholder("arrow.down.circle")   // loading
+                    }
+                }
+            } else {
+                placeholder("photo")
+            }
+        }
+    }
+
+    private func placeholder(_ symbol: String) -> some View {
+        ZStack {
+            Rectangle().fill(.quaternary)
+            Image(systemName: symbol).font(.caption).foregroundStyle(.secondary)
         }
     }
 }
