@@ -32,10 +32,11 @@ Keep the Mac awake while serving: `caffeinate -s python3 hub.py`.
 
 ## 2. Worker — on the 4090 PC
 
-Ollama must be running locally with the vision model pulled:
+Ollama must be running locally with the vision model pulled (default `qwen3-vl:8b`):
 ```powershell
-ollama pull qwen2.5vl:7b
-# OLLAMA_HOST can stay 127.0.0.1:11434 (private) when the worker runs on the same PC
+ollama pull qwen3-vl:8b
+# override with AIGLASS_MODEL=... (e.g. qwen3-vl:32b for higher quality, slower)
+# OLLAMA_HOST=0.0.0.0:11434 so the WSL worker can reach it
 ```
 Then:
 ```powershell

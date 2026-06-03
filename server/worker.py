@@ -15,7 +15,7 @@ Run (PowerShell or WSL on the 4090):
 Config via env vars (defaults shown):
     AIGLASS_HUB   = http://100.76.69.64:8765     # the M1 hub's Tailscale address
     OLLAMA_URL    = http://localhost:11434       # local Ollama on the 4090
-    AIGLASS_MODEL = qwen2.5vl:7b
+    AIGLASS_MODEL = qwen3-vl:8b   (must be pulled first: `ollama pull qwen3-vl:8b`)
     AIGLASS_TOKEN =                              # must match the hub if set
     AIGLASS_POLL  = 1.5                          # seconds between polls when idle
 """
@@ -36,7 +36,7 @@ def _normalize(url: str) -> str:
 
 HUB = _normalize(os.environ.get("AIGLASS_HUB", "http://100.76.69.64:8765"))
 OLLAMA = _normalize(os.environ.get("OLLAMA_URL", "http://localhost:11434"))
-MODEL = os.environ.get("AIGLASS_MODEL", "qwen2.5vl:7b")
+MODEL = os.environ.get("AIGLASS_MODEL", "qwen3-vl:8b")
 TOKEN = os.environ.get("AIGLASS_TOKEN", "")
 POLL = float(os.environ.get("AIGLASS_POLL", "1.5"))
 
