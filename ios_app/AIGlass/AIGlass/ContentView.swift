@@ -40,9 +40,17 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            // Let the BLE manager read the current key + auto-caption flag
+            // Let the BLE manager read the current captioning preferences
             // without owning settings state.
-            ble.captionConfig = { (settings.apiKey, settings.autoCaption) }
+            ble.captionConfig = {
+                BLEManager.CaptionSettings(
+                    auto: settings.autoCaption,
+                    useHub: settings.useHub,
+                    hubURL: settings.hubURL,
+                    hubToken: settings.hubToken,
+                    apiKey: settings.apiKey
+                )
+            }
         }
     }
 
@@ -123,19 +131,21 @@ struct ContentView: View {
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(.red)
-                Button("再試行") { ble.requestCaption(for: photo.id, apiKey: settings.apiKey) }
+                Button("再試行") { ble.requestCaption(for: photo.id) }
                     .buttonStyle(.bordered)
-                    .disabled(!settings.hasKey)
+                    .disabled(!settings.canCaption)
             } else {
                 Button {
-                    ble.requestCaption(for: photo.id, apiKey: settings.apiKey)
+                    ble.requestCaption(for: photo.id)
                 } label: {
                     Label("AIで説明を生成", systemImage: "sparkles")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!settings.hasKey)
-                if !settings.hasKey {
-                    Text("⚙️ 設定でAPIキーを入力すると説明を生成できます")
+                .disabled(!settings.canCaption)
+                if !settings.canCaption {
+                    Text(settings.useHub
+                         ? "⚙️ 設定でハブURLを入力すると説明を生成できます"
+                         : "⚙️ 設定でAPIキーを入力すると説明を生成できます")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -218,17 +228,40 @@ private struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Claude API キー") {
-                    SecureField("sk-ant-...", text: $settings.apiKey)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    Text("console.anthropic.com で発行したAPIキー。MAXプランとは別課金（従量制）です。")
+                Section("推論バックエンド") {
+                    Toggle("ローカルハブを使う（4090）", isOn: $settings.useHub)
+                    Text(settings.useHub
+                         ? "Tailscale経由で自宅の4090に推論させます。API課金ゼロ・画像は自分の機材内。"
+                         : "Claude API（クラウド）に推論させます。MAXプランとは別の従量課金。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                if settings.useHub {
+                    Section("ローカルハブ") {
+                        TextField("http://100.76.69.64:8765", text: $settings.hubURL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.URL)
+                        SecureField("共有トークン（任意）", text: $settings.hubToken)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Text("M1ハブのTailscaleアドレス。iPhoneもTailscaleに接続している必要があります。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Section("Claude API キー") {
+                        SecureField("sk-ant-...", text: $settings.apiKey)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Text("console.anthropic.com で発行したAPIキー。MAXプランとは別課金（従量制）です。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Section("AI説明") {
                     Toggle("受信ごとに自動で説明を生成", isOn: $settings.autoCaption)
-                    Text("ONにすると写真1枚ごとにClaudeを呼びます（Haiku 4.5でおよそ0.1円/枚）。連続撮影中は費用が積み上がるため、まずはOFF＋手動生成を推奨。")
+                    Text("ONにすると写真1枚ごとに推論します。連続撮影中は負荷/費用が積み上がるため、まずはOFF＋手動生成を推奨。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

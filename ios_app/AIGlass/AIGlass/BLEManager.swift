@@ -51,9 +51,18 @@ final class BLEManager: NSObject, ObservableObject {
     private var hadGap = false
 
     // MARK: Captioning
-    /// Supplies the current API key + auto-caption preference. Set by the view
-    /// from AppSettings so the manager doesn't own settings state.
-    var captionConfig: () -> (apiKey: String, auto: Bool) = { ("", false) }
+    struct CaptionSettings {
+        var auto = false
+        var useHub = true
+        var hubURL = ""
+        var hubToken = ""
+        var apiKey = ""
+        var canCaption: Bool { useHub ? !hubURL.isEmpty : !apiKey.isEmpty }
+    }
+
+    /// Supplies the current captioning preferences. Set by the view from
+    /// AppSettings so the manager doesn't own settings state.
+    var captionConfig: () -> CaptionSettings = { CaptionSettings() }
 
     override init() {
         super.init()
@@ -146,18 +155,20 @@ final class BLEManager: NSObject, ObservableObject {
         photos.insert(photo, at: 0)
         log("✅ photo \(data.count) bytes / \(chunks) chunks\(gap ? " (gap!)" : "")")
 
-        // Auto-caption if enabled and a key is present.
-        let (apiKey, auto) = captionConfig()
-        if auto && !apiKey.isEmpty {
-            requestCaption(for: photo.id, apiKey: apiKey)
+        // Auto-caption if enabled and the selected backend is configured.
+        let cfg = captionConfig()
+        if cfg.auto && cfg.canCaption {
+            requestCaption(for: photo.id)
         }
     }
 
     // MARK: Caption requests
 
-    /// Kick off (or retry) Claude captioning for one stored photo.
-    func requestCaption(for id: UUID, apiKey: String) {
-        guard !apiKey.isEmpty,
+    /// Kick off (or retry) captioning for one stored photo, using the backend
+    /// selected in settings (local hub by default, Claude as fallback).
+    func requestCaption(for id: UUID) {
+        let cfg = captionConfig()
+        guard cfg.canCaption,
               let index = photos.firstIndex(where: { $0.id == id }),
               !photos[index].isCaptioning
         else { return }
@@ -170,12 +181,20 @@ final class BLEManager: NSObject, ObservableObject {
 
         Task {
             do {
-                let text = try await CaptionService.caption(jpeg: jpeg, apiKey: apiKey)
+                let text: String
+                if cfg.useHub {
+                    text = try await HubCaptionService.caption(
+                        jpeg: jpeg,
+                        config: .init(baseURL: cfg.hubURL, token: cfg.hubToken)
+                    )
+                } else {
+                    text = try await CaptionService.caption(jpeg: jpeg, apiKey: cfg.apiKey)
+                }
                 updatePhoto(id: id) {
                     $0.caption = text
                     $0.isCaptioning = false
                 }
-                log("📝 caption ok")
+                log("📝 caption ok (\(cfg.useHub ? "hub" : "claude"))")
             } catch {
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 updatePhoto(id: id) {

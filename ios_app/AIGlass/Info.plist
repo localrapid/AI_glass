@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The local hub is reached over plain HTTP on a Tailscale IP, which iOS
+	     App Transport Security blocks by default. Allow it for this personal
+	     prototype. (Tighten to a scoped exception, or serve the hub over HTTPS,
+	     before any real distribution.) Other Info.plist keys are still
+	     auto-generated and merged on top of this file. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+</dict>
+</plist>
