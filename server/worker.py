@@ -43,9 +43,23 @@ POLL = float(os.environ.get("AIGLASS_POLL", "1.5"))
 AUTH = {"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}
 
 PROMPT = (
-    "この画像に写っているもの（人・物・場所・行動）を日本語で1〜2文、具体的に説明してください。"
-    "「画像には」などの前置きや定型句は不要で、説明本文だけを返してください。"
+    "次の写真の内容を日本語で説明してください。"
+    "条件: 1〜2文。写っている人・物・場所・行動を具体的に。"
+    "禁止: 「この画像は」「画像には」「写真には」などの前置き。説明本文だけを出力。"
 )
+
+# Safety net: strip leading boilerplate the 7B model sometimes adds anyway.
+_PREFIXES = ("この画像は", "この画像には", "画像には", "画像は",
+             "写真には", "この写真は", "この写真には")
+
+
+def _clean(text: str) -> str:
+    t = text.strip()
+    for p in _PREFIXES:
+        if t.startswith(p):
+            t = t[len(p):].lstrip("、,　 ")
+            break
+    return t
 
 
 def _get_json(url, timeout=15):
@@ -74,7 +88,7 @@ def caption(jpeg: bytes) -> str:
         f"{OLLAMA}/api/generate",
         {"model": MODEL, "prompt": PROMPT, "images": [b64], "stream": False},
     )
-    return (out.get("response") or "").strip()
+    return _clean(out.get("response") or "")
 
 
 def main():

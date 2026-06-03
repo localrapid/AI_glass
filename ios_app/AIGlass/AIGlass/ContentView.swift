@@ -8,11 +8,15 @@
 //
 
 import SwiftUI
+import SwiftData
 
 struct ContentView: View {
     @StateObject private var ble = BLEManager()
     @StateObject private var settings = AppSettings()
     @State private var showSettings = false
+
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \PhotoRecord.receivedAt, order: .reverse) private var photos: [PhotoRecord]
 
     var body: some View {
         NavigationStack {
@@ -51,6 +55,7 @@ struct ContentView: View {
                     apiKey: settings.apiKey
                 )
             }
+            ble.attach(context: modelContext)
         }
     }
 
@@ -79,12 +84,14 @@ struct ContentView: View {
 
     private var latestImageCard: some View {
         VStack(spacing: 8) {
-            if let latest = ble.latest {
-                Image(uiImage: latest.image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            if let latest = photos.first {
+                if let img = latest.image {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
                 Text("\(latest.byteCount) bytes ・ \(latest.chunkCount) chunks\(latest.hadGap ? " ⚠️gap" : "")")
                     .font(.caption.monospaced())
                     .foregroundStyle(latest.hadGap ? .orange : .secondary)
@@ -116,7 +123,7 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func captionView(for photo: CapturedPhoto) -> some View {
+    private func captionView(for photo: PhotoRecord) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if photo.isCaptioning {
                 HStack(spacing: 6) {
@@ -183,15 +190,17 @@ struct ContentView: View {
 
     private var historyList: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("受信履歴 (\(ble.photos.count))")
+            Text("受信履歴 (\(photos.count))")
                 .font(.subheadline.bold())
-            ForEach(ble.photos) { photo in
+            ForEach(photos) { photo in
                 HStack(spacing: 12) {
-                    Image(uiImage: photo.image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 56, height: 56)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    if let img = photo.image {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 56, height: 56)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
                     VStack(alignment: .leading, spacing: 2) {
                         Text(photo.receivedAt, format: .dateTime.hour().minute().second())
                             .font(.callout)

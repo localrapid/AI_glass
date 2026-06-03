@@ -15,6 +15,7 @@
 import Foundation
 import Combine
 import CoreBluetooth
+import SwiftData
 import UIKit
 
 @MainActor
@@ -30,14 +31,15 @@ final class BLEManager: NSObject, ObservableObject {
         case disconnected = "切断"
     }
 
-    // MARK: Published state
+    // MARK: Published state (transient UI; photos live in SwiftData)
     @Published private(set) var state: ConnectionState = .idle
-    @Published private(set) var photos: [CapturedPhoto] = []
-    @Published private(set) var latest: CapturedPhoto?
     @Published private(set) var chunksInProgress = 0
     @Published private(set) var bytesInProgress = 0
     @Published private(set) var negotiatedMTU = 0
     @Published private(set) var lastLog = ""
+
+    /// SwiftData context for persisting received photos. Injected by the view.
+    var modelContext: ModelContext?
 
     // MARK: CoreBluetooth
     private var central: CBCentralManager!
@@ -139,45 +141,59 @@ final class BLEManager: NSObject, ObservableObject {
             log("empty frame ignored")
             return
         }
-        guard let image = UIImage(data: data) else {
+        guard UIImage(data: data) != nil else {
             log("⚠️ JPEG decode failed: \(data.count) bytes, \(chunks) chunks, gap=\(gap)")
             return
         }
+        guard let context = modelContext else {
+            log("no modelContext yet; photo dropped")
+            return
+        }
 
-        let photo = CapturedPhoto(
-            image: image,
-            jpegData: data,
-            receivedAt: Date(),
-            chunkCount: chunks,
-            hadGap: gap
-        )
-        latest = photo
-        photos.insert(photo, at: 0)
+        let record = PhotoRecord(receivedAt: Date(), jpeg: data, chunkCount: chunks, hadGap: gap)
+        context.insert(record)
+        try? context.save()
         log("✅ photo \(data.count) bytes / \(chunks) chunks\(gap ? " (gap!)" : "")")
 
         // Auto-caption if enabled and the selected backend is configured.
         let cfg = captionConfig()
         if cfg.auto && cfg.canCaption {
-            requestCaption(for: photo.id)
+            requestCaption(for: record.id)
         }
     }
 
     // MARK: Caption requests
+
+    /// Inject the SwiftData context and clear any captions left "in progress"
+    /// by a previous run (so the UI doesn't show a stuck spinner).
+    func attach(context: ModelContext) {
+        modelContext = context
+        let stuck = FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.isCaptioning == true })
+        if let rows = try? context.fetch(stuck) {
+            for r in rows { r.isCaptioning = false }
+            try? context.save()
+        }
+    }
+
+    private func fetchRecord(_ id: UUID, _ context: ModelContext) -> PhotoRecord? {
+        let d = FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.id == id })
+        return try? context.fetch(d).first
+    }
 
     /// Kick off (or retry) captioning for one stored photo, using the backend
     /// selected in settings (local hub by default, Claude as fallback).
     func requestCaption(for id: UUID) {
         let cfg = captionConfig()
         guard cfg.canCaption,
-              let index = photos.firstIndex(where: { $0.id == id }),
-              !photos[index].isCaptioning
+              let context = modelContext,
+              let record = fetchRecord(id, context),
+              !record.isCaptioning
         else { return }
 
-        let jpeg = photos[index].jpegData
-        updatePhoto(id: id) {
-            $0.isCaptioning = true
-            $0.captionError = nil
-        }
+        let jpeg = record.jpeg
+        record.isCaptioning = true
+        record.captionError = nil
+        try? context.save()
 
         Task {
             do {
@@ -190,26 +206,22 @@ final class BLEManager: NSObject, ObservableObject {
                 } else {
                     text = try await CaptionService.caption(jpeg: jpeg, apiKey: cfg.apiKey)
                 }
-                updatePhoto(id: id) {
-                    $0.caption = text
-                    $0.isCaptioning = false
+                if let r = fetchRecord(id, context) {
+                    r.caption = text
+                    r.isCaptioning = false
+                    try? context.save()
                 }
                 log("📝 caption ok (\(cfg.useHub ? "hub" : "claude"))")
             } catch {
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                updatePhoto(id: id) {
-                    $0.captionError = message
-                    $0.isCaptioning = false
+                if let r = fetchRecord(id, context) {
+                    r.captionError = message
+                    r.isCaptioning = false
+                    try? context.save()
                 }
                 log("📝 caption failed: \(message)")
             }
         }
-    }
-
-    private func updatePhoto(id: UUID, _ mutate: (inout CapturedPhoto) -> Void) {
-        guard let index = photos.firstIndex(where: { $0.id == id }) else { return }
-        mutate(&photos[index])
-        if latest?.id == id { latest = photos[index] }
     }
 
     private func log(_ message: String) {

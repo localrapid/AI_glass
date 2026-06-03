@@ -2,10 +2,9 @@
 //  AIGlassApp.swift
 //  AIGlass
 //
-//  Created by memomo on 2026/06/03.
-//
 
 import SwiftUI
+import SwiftData
 
 @main
 struct AIGlassApp: App {
@@ -13,5 +12,6 @@ struct AIGlassApp: App {
         WindowGroup {
             ContentView()
         }
+        .modelContainer(for: PhotoRecord.self)
     }
 }
