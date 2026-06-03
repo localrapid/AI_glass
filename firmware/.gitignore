@@ -1,0 +1,10 @@
+# Arduino / arduino-cli build artifacts
+build/
+*.bin
+*.elf
+*.map
+*.hex
+*.uf2
+
+# arduino-cli per-sketch cache
+.cache/

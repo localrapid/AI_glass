@@ -1,0 +1,22 @@
+# OS
+.DS_Store
+# Firmware build
+firmware/**/build/
+*.bin
+*.elf
+# iOS / Xcode
+ios_app/**/xcuserdata/
+ios_app/**/*.xcuserstate
+ios_app/**/DerivedData/
+build/
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+# Hub runtime data (never commit personal lifelog media)
+server/aiglass-hub/
+aiglass-hub/
+# Secrets
+.env
+*.local

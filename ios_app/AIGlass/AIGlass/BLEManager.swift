@@ -1,0 +1,318 @@
+//
+//  BLEManager.swift
+//  AIGlass
+//
+//  Central-side BLE driver for the AI_glass eyewear. Scans for the service in
+//  GlassUUID, auto-connects, subscribes to Photo Data notifications, and
+//  reassembles JPEG frames from the counter-prefixed chunk stream. Also writes
+//  the Photo Control characteristic to drive auto-capture interval (Phase 1
+//  step 8).
+//
+//  CoreBluetooth does not work in the iOS Simulator — run on a physical device
+//  to actually receive photos.
+//
+
+import Foundation
+import Combine
+import CoreBluetooth
+import UIKit
+
+@MainActor
+final class BLEManager: NSObject, ObservableObject {
+
+    enum ConnectionState: String {
+        case poweredOff   = "Bluetoothオフ"
+        case unauthorized = "Bluetooth未許可"
+        case idle         = "待機中"
+        case scanning     = "スキャン中…"
+        case connecting   = "接続中…"
+        case connected    = "接続済み"
+        case disconnected = "切断"
+    }
+
+    // MARK: Published state
+    @Published private(set) var state: ConnectionState = .idle
+    @Published private(set) var photos: [CapturedPhoto] = []
+    @Published private(set) var latest: CapturedPhoto?
+    @Published private(set) var chunksInProgress = 0
+    @Published private(set) var bytesInProgress = 0
+    @Published private(set) var negotiatedMTU = 0
+    @Published private(set) var lastLog = ""
+
+    // MARK: CoreBluetooth
+    private var central: CBCentralManager!
+    private var glass: CBPeripheral?
+    private var photoControlChar: CBCharacteristic?
+
+    // MARK: Frame reassembly state
+    private var frameBuffer = Data()
+    private var lastCounter = -1
+    private var chunkCount = 0
+    private var hadGap = false
+
+    // MARK: Captioning
+    /// Supplies the current API key + auto-caption preference. Set by the view
+    /// from AppSettings so the manager doesn't own settings state.
+    var captionConfig: () -> (apiKey: String, auto: Bool) = { ("", false) }
+
+    override init() {
+        super.init()
+        // queue: nil delivers delegate callbacks on the main queue, matching
+        // this @MainActor class so published state mutates safely.
+        central = CBCentralManager(delegate: self, queue: nil)
+    }
+
+    // MARK: Intent
+
+    func startScan() {
+        guard central.state == .poweredOn else { return }
+        state = .scanning
+        log("scanning for AI_glass…")
+        central.scanForPeripherals(withServices: [GlassUUID.service])
+    }
+
+    func disconnect() {
+        if let glass { central.cancelPeripheralConnection(glass) }
+    }
+
+    /// Write a Photo Control command (see PhotoControlCommand).
+    func sendControl(_ command: Int8) {
+        guard let glass, let char = photoControlChar else {
+            log("control write skipped: not connected")
+            return
+        }
+        var value = command
+        let data = Data(bytes: &value, count: 1)
+        glass.writeValue(data, for: char, type: .withResponse)
+        log("Photo Control <- \(command)")
+    }
+
+    // MARK: Reassembly
+
+    private func resetFrame() {
+        frameBuffer.removeAll(keepingCapacity: true)
+        lastCounter = -1
+        chunkCount = 0
+        hadGap = false
+        chunksInProgress = 0
+        bytesInProgress = 0
+    }
+
+    private func ingest(_ packet: Data) {
+        guard packet.count >= PhotoProtocol.headerSize else { return }
+        let counter = UInt16(packet[0]) | (UInt16(packet[1]) << 8)
+
+        if counter == PhotoProtocol.endOfFrameMarker {
+            finalizeFrame()
+            return
+        }
+
+        if Int(counter) != lastCounter + 1 {
+            hadGap = true
+            log("⚠️ chunk gap: expected \(lastCounter + 1), got \(counter)")
+        }
+        lastCounter = Int(counter)
+
+        let payload = packet.suffix(from: PhotoProtocol.headerSize)
+        frameBuffer.append(payload)
+        chunkCount += 1
+        chunksInProgress = chunkCount
+        bytesInProgress = frameBuffer.count
+    }
+
+    private func finalizeFrame() {
+        let data = frameBuffer
+        let chunks = chunkCount
+        let gap = hadGap
+        defer { resetFrame() }
+
+        guard !data.isEmpty else {
+            log("empty frame ignored")
+            return
+        }
+        guard let image = UIImage(data: data) else {
+            log("⚠️ JPEG decode failed: \(data.count) bytes, \(chunks) chunks, gap=\(gap)")
+            return
+        }
+
+        let photo = CapturedPhoto(
+            image: image,
+            jpegData: data,
+            receivedAt: Date(),
+            chunkCount: chunks,
+            hadGap: gap
+        )
+        latest = photo
+        photos.insert(photo, at: 0)
+        log("✅ photo \(data.count) bytes / \(chunks) chunks\(gap ? " (gap!)" : "")")
+
+        // Auto-caption if enabled and a key is present.
+        let (apiKey, auto) = captionConfig()
+        if auto && !apiKey.isEmpty {
+            requestCaption(for: photo.id, apiKey: apiKey)
+        }
+    }
+
+    // MARK: Caption requests
+
+    /// Kick off (or retry) Claude captioning for one stored photo.
+    func requestCaption(for id: UUID, apiKey: String) {
+        guard !apiKey.isEmpty,
+              let index = photos.firstIndex(where: { $0.id == id }),
+              !photos[index].isCaptioning
+        else { return }
+
+        let jpeg = photos[index].jpegData
+        updatePhoto(id: id) {
+            $0.isCaptioning = true
+            $0.captionError = nil
+        }
+
+        Task {
+            do {
+                let text = try await CaptionService.caption(jpeg: jpeg, apiKey: apiKey)
+                updatePhoto(id: id) {
+                    $0.caption = text
+                    $0.isCaptioning = false
+                }
+                log("📝 caption ok")
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                updatePhoto(id: id) {
+                    $0.captionError = message
+                    $0.isCaptioning = false
+                }
+                log("📝 caption failed: \(message)")
+            }
+        }
+    }
+
+    private func updatePhoto(id: UUID, _ mutate: (inout CapturedPhoto) -> Void) {
+        guard let index = photos.firstIndex(where: { $0.id == id }) else { return }
+        mutate(&photos[index])
+        if latest?.id == id { latest = photos[index] }
+    }
+
+    private func log(_ message: String) {
+        lastLog = message
+        print("[BLE] \(message)")
+    }
+}
+
+// MARK: - CBCentralManagerDelegate
+
+extension BLEManager: CBCentralManagerDelegate {
+    // The central is created with `queue: nil`, so every delegate callback runs
+    // on the main queue. `MainActor.assumeIsolated` lets us touch MainActor
+    // state synchronously without hopping through a Task (which would require
+    // sending non-Sendable CoreBluetooth objects across isolation).
+    nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        MainActor.assumeIsolated {
+            switch central.state {
+            case .poweredOn:
+                log("Bluetooth on")
+                startScan()
+            case .poweredOff:
+                state = .poweredOff
+            case .unauthorized:
+                state = .unauthorized
+            default:
+                state = .idle
+            }
+        }
+    }
+
+    nonisolated func centralManager(_ central: CBCentralManager,
+                                    didDiscover peripheral: CBPeripheral,
+                                    advertisementData: [String: Any],
+                                    rssi RSSI: NSNumber) {
+        MainActor.assumeIsolated {
+            log("found \(peripheral.name ?? "device") rssi=\(RSSI)")
+            central.stopScan()
+            state = .connecting
+            glass = peripheral
+            peripheral.delegate = self
+            central.connect(peripheral)
+        }
+    }
+
+    nonisolated func centralManager(_ central: CBCentralManager,
+                                    didConnect peripheral: CBPeripheral) {
+        MainActor.assumeIsolated {
+            state = .connected
+            negotiatedMTU = peripheral.maximumWriteValueLength(for: .withoutResponse) + 3
+            log("connected, ~MTU \(negotiatedMTU)")
+            peripheral.discoverServices([GlassUUID.service])
+        }
+    }
+
+    nonisolated func centralManager(_ central: CBCentralManager,
+                                    didDisconnectPeripheral peripheral: CBPeripheral,
+                                    error: Error?) {
+        MainActor.assumeIsolated {
+            state = .disconnected
+            photoControlChar = nil
+            resetFrame()
+            log("disconnected\(error.map { ": \($0.localizedDescription)" } ?? ""), re-scanning")
+            startScan()
+        }
+    }
+}
+
+// MARK: - CBPeripheralDelegate
+
+extension BLEManager: CBPeripheralDelegate {
+    nonisolated func peripheral(_ peripheral: CBPeripheral,
+                                didDiscoverServices error: Error?) {
+        MainActor.assumeIsolated {
+            guard let service = peripheral.services?.first(where: { $0.uuid == GlassUUID.service }) else {
+                log("service not found")
+                return
+            }
+            peripheral.discoverCharacteristics(
+                [GlassUUID.photoData, GlassUUID.photoControl, GlassUUID.touchEvent, GlassUUID.status],
+                for: service
+            )
+        }
+    }
+
+    nonisolated func peripheral(_ peripheral: CBPeripheral,
+                                didDiscoverCharacteristicsFor service: CBService,
+                                error: Error?) {
+        MainActor.assumeIsolated {
+            for char in service.characteristics ?? [] {
+                switch char.uuid {
+                case GlassUUID.photoData:
+                    peripheral.setNotifyValue(true, for: char)
+                    log("subscribed to Photo Data")
+                case GlassUUID.photoControl:
+                    photoControlChar = char
+                    // Kick off auto-capture at the default interval.
+                    sendControl(PhotoControlCommand.defaultInterval)
+                case GlassUUID.touchEvent, GlassUUID.status:
+                    peripheral.setNotifyValue(true, for: char)
+                default:
+                    break
+                }
+            }
+        }
+    }
+
+    nonisolated func peripheral(_ peripheral: CBPeripheral,
+                                didUpdateValueFor characteristic: CBCharacteristic,
+                                error: Error?) {
+        MainActor.assumeIsolated {
+            guard let value = characteristic.value else { return }
+            switch characteristic.uuid {
+            case GlassUUID.photoData:
+                ingest(value)
+            case GlassUUID.touchEvent:
+                log("touch event \(Array(value))")
+            case GlassUUID.status:
+                log("status \(Array(value))")
+            default:
+                break
+            }
+        }
+    }
+}
