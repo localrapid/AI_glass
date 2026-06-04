@@ -114,7 +114,10 @@ void bleSetup() {
   g_server = BLEDevice::createServer();
   g_server->setCallbacks(new ServerCallbacks());
 
-  BLEService* service = g_server->createService(BLE_SERVICE_UUID);
+  // Reserve enough attribute handles for all characteristics + their CCCDs.
+  // The default (15) overflows once the audio characteristics are added, which
+  // silently drops them — give plenty of headroom for future ones too.
+  BLEService* service = g_server->createService(BLEUUID(BLE_SERVICE_UUID), 40);
 
   // Photo Data — READ + NOTIFY (chunked JPEG, implemented in step 7)
   g_photo_data = service->createCharacteristic(
