@@ -9,7 +9,7 @@
 #include "camera_pins.h"
 #include "config.h"
 
-bool cameraSetup() {
+bool cameraPowerOn() {
   camera_config_t config = {};
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer   = LEDC_TIMER_0;
@@ -45,6 +45,10 @@ bool cameraSetup() {
   }
   Serial.println(F("[CAM] init OK"));
   return true;
+}
+
+void cameraPowerOff() {
+  esp_camera_deinit();
 }
 
 camera_fb_t* cameraCaptureFrame() {

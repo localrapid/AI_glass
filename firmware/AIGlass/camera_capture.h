@@ -3,9 +3,14 @@
 #include <Arduino.h>
 #include "esp_camera.h"
 
-// Initialize the OV2640 with the pin map in camera_pins.h and the format
-// constants in config.h. Returns true on success; false logs to Serial.
-bool cameraSetup();
+// Power the OV2640 ON (esp_camera_init) with the pin map in camera_pins.h and
+// the format constants in config.h. Returns true on success; false logs to
+// Serial. On the XIAO Sense the PWDN pin isn't wired, so power saving between
+// captures is done by deinit (cameraPowerOff), which stops the XCLK clock.
+bool cameraPowerOn();
+
+// Power the camera OFF (esp_camera_deinit) to cut idle current between shots.
+void cameraPowerOff();
 
 // Grab one JPEG. Returns nullptr on failure. The framebuffer is owned by the
 // camera driver — callers MUST call cameraReleaseFrame() when done so PSRAM is

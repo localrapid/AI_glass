@@ -2,7 +2,7 @@
 
 // === Identity ===
 #define BLE_DEVICE_NAME           "AI_glass"
-#define FIRMWARE_VERSION          "0.2.0-phase2-audio"
+#define FIRMWARE_VERSION          "0.2.1-phase2-camoff"
 #define HARDWARE_NAME             "Seeed XIAO ESP32-S3 Sense"
 #define MANUFACTURER_NAME         "AI_glass DIY"
 
@@ -36,6 +36,9 @@
 #define CAMERA_JPEG_QUALITY       10               // 0 = best, 63 = worst
 #define CAMERA_FB_COUNT           1
 #define CAMERA_XCLK_FREQ_HZ       20000000
+// After power-cycling the camera, discard a few frames so auto-exposure/gain
+// settle before the kept shot (the OV2640 needs a moment after re-init).
+#define CAMERA_WARMUP_FRAMES      3
 
 // === Audio (Phase 2) — PDM mic on XIAO ESP32-S3 Sense ===
 // On-demand short clips: the app writes N seconds to Audio Control, the device

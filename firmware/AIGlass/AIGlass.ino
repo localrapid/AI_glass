@@ -3,10 +3,10 @@
  * Target board: Seeed XIAO ESP32-S3 Sense (esp32:esp32:XIAO_ESP32S3)
  *
  * Current step:
- *   Phase 2 (audio) — photos work as in Phase 1 (Photo Control schedules
- *   captures, streamed over Photo Data). Added on-demand audio: the app writes
- *   N seconds to Audio Control, the device records 16kHz PCM from the PDM mic
- *   and streams it over Audio Data. Touch input (step 9) still stubbed.
+ *   Phase 2 (audio) + power: photos and on-demand audio as before. The camera
+ *   is now powered up only around each capture (deinit between shots) to cut
+ *   idle current — the mic/VAD path is independent and unaffected. Touch input
+ *   (step 9) still stubbed.
  *
  * See ../docs/FIRMWARE_DESIGN.md for the full plan.
  */
@@ -38,7 +38,9 @@ void setup() {
   digitalWrite(STATUS_LED_PIN, STATUS_LED_OFF);
 
   bleSetup();
-  cameraSetup();
+  // Verify the camera at boot, then power it off — it's only powered up around
+  // each capture to save battery (the XIAO Sense has no PWDN pin).
+  if (cameraPowerOn()) cameraPowerOff();
   audioSetup();
   // Phase 1 step 9: touchSetup();
 }
@@ -65,15 +67,24 @@ void loop() {
     const bool due  = once || (interval > 0 && now - last_capture_ms >= interval);
     if (due) {
       last_capture_ms = now;
-      camera_fb_t* fb = cameraCaptureFrame();
-      if (fb) {
-        Serial.print(F("[CAM] captured "));
-        Serial.print(fb->len);
-        Serial.println(F(" bytes"));
-        bleStatusUpdate(STATUS_CAPTURING);
-        blePhotoSend(fb->buf, fb->len);
-        bleStatusUpdate(0);
-        cameraReleaseFrame(fb);
+      // Power the camera up only for the capture, then back off.
+      if (cameraPowerOn()) {
+        // Drop a few frames so exposure/gain settle after re-init.
+        for (int i = 0; i < CAMERA_WARMUP_FRAMES; i++) {
+          camera_fb_t* w = cameraCaptureFrame();
+          if (w) cameraReleaseFrame(w);
+        }
+        camera_fb_t* fb = cameraCaptureFrame();
+        if (fb) {
+          Serial.print(F("[CAM] captured "));
+          Serial.print(fb->len);
+          Serial.println(F(" bytes"));
+          bleStatusUpdate(STATUS_CAPTURING);
+          blePhotoSend(fb->buf, fb->len);
+          bleStatusUpdate(0);
+          cameraReleaseFrame(fb);
+        }
+        cameraPowerOff();
       }
     }
     // Phase 2: on-demand audio clip requested via Audio Control.
