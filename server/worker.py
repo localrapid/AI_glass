@@ -24,6 +24,8 @@ import os
 import json
 import time
 import base64
+import wave
+import array
 import tempfile
 import urllib.request
 import urllib.error
@@ -109,10 +111,49 @@ def _load_whisper():
     return _whisper
 
 
+def _preprocess_wav(path: str) -> str:
+    """PDM mics output a large DC bias and a quiet signal. Remove the DC offset
+    and normalize the level so Whisper actually hears the speech."""
+    w = wave.open(path, "rb")
+    sr, n = w.getframerate(), w.getnframes()
+    samples = array.array("h")
+    samples.frombytes(w.readframes(n))
+    w.close()
+    if not samples:
+        return path
+
+    dc = sum(samples) / len(samples)
+    vals = [x - dc for x in samples]
+    peak = max((abs(v) for v in vals), default=0)
+    gain = min(0.6 * 32767 / peak, 60.0) if peak > 0 else 1.0
+    out = array.array(
+        "h", (int(max(-32768, min(32767, v * gain))) for v in vals)
+    )
+    print(f"[worker]   audio dc={dc:.0f} peak={peak} gain={gain:.1f}x")
+
+    op = path + ".pp.wav"
+    ow = wave.open(op, "wb")
+    ow.setnchannels(1)
+    ow.setsampwidth(2)
+    ow.setframerate(sr)
+    ow.writeframes(out.tobytes())
+    ow.close()
+    return op
+
+
 def transcribe(wav_path: str) -> str:
     model = _load_whisper()
-    segments, _info = model.transcribe(wav_path, language="ja", vad_filter=True)
-    return "".join(seg.text for seg in segments).strip()
+    pp = _preprocess_wav(wav_path)
+    try:
+        # vad_filter off: clips are short and may be quiet — let Whisper try all.
+        segments, _info = model.transcribe(pp, language="ja", vad_filter=False)
+        return "".join(seg.text for seg in segments).strip()
+    finally:
+        if pp != wav_path:
+            try:
+                os.remove(pp)
+            except OSError:
+                pass
 
 
 def main():
