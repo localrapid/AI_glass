@@ -73,8 +73,9 @@ final class AvatarModel {
     var errorMessage: String?
     private var vrm: VRMEntity?
     private var time: TimeInterval = 0
-    /// VRM 0.x (VRoid default) faces +Z, so spin 180° to face the camera.
-    private let facing: Float = .pi
+    /// Yaw so the avatar faces the camera. VRM 0.x faces away (needs 180°),
+    /// VRM 1.0 already faces the camera (0). Set from the loaded model.
+    private var facing: Float = .pi
 
     func build(into content: RealityViewContent) {
         // Soft key light so the toon materials read well off-AR.
@@ -92,6 +93,10 @@ final class AvatarModel {
         do {
             let loader = try VRMEntityLoader(named: "model.vrm")
             let entity = try loader.loadEntity()
+            switch entity.vrm {
+            case .v0: facing = .pi   // VRM 0.x faces away — spin to face the camera
+            case .v1: facing = 0     // VRM 1.0 already faces the camera
+            }
             entity.entity.transform.rotation = simd_quatf(angle: facing, axis: SIMD3(0, 1, 0))
             content.add(entity.entity)
             vrm = entity

@@ -20,3 +20,7 @@ aiglass-hub/
 # Secrets
 .env
 *.local
+
+# VRM avatar models (licensed / large — keep local)
+*.vrm
+*.glb
