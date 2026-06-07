@@ -10,7 +10,7 @@ import SwiftData
 struct AIGlassApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
         }
         .modelContainer(for: [PhotoRecord.self, TranscriptRecord.self])
     }
