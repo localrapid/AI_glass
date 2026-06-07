@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		674B63102FD5C673009EF801 /* VRMKit in Frameworks */ = {isa = PBXBuildFile; productRef = 674B630F2FD5C673009EF801 /* VRMKit */; };
+		674B63122FD5C673009EF801 /* VRMRealityKit in Frameworks */ = {isa = PBXBuildFile; productRef = 674B63112FD5C673009EF801 /* VRMRealityKit */; };
+		674B63142FD5C673009EF801 /* VRMSceneKit in Frameworks */ = {isa = PBXBuildFile; productRef = 674B63132FD5C673009EF801 /* VRMSceneKit */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		674B62AC2FCF4261009EF801 /* AIGlass.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AIGlass.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +29,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				674B63122FD5C673009EF801 /* VRMRealityKit in Frameworks */,
+				674B63142FD5C673009EF801 /* VRMSceneKit in Frameworks */,
+				674B63102FD5C673009EF801 /* VRMKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +74,9 @@
 			);
 			name = AIGlass;
 			packageProductDependencies = (
+				674B630F2FD5C673009EF801 /* VRMKit */,
+				674B63112FD5C673009EF801 /* VRMRealityKit */,
+				674B63132FD5C673009EF801 /* VRMSceneKit */,
 			);
 			productName = AIGlass;
 			productReference = 674B62AC2FCF4261009EF801 /* AIGlass.app */;
@@ -94,6 +106,9 @@
 			);
 			mainGroup = 674B62A32FCF4261009EF801;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				674B630E2FD5C673009EF801 /* XCRemoteSwiftPackageReference "VRMKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 674B62AD2FCF4261009EF801 /* Products */;
 			projectDirPath = "";
@@ -336,6 +351,35 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		674B630E2FD5C673009EF801 /* XCRemoteSwiftPackageReference "VRMKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/tattn/VRMKit";
+			requirement = {
+				kind = branch;
+				branch = main;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		674B630F2FD5C673009EF801 /* VRMKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 674B630E2FD5C673009EF801 /* XCRemoteSwiftPackageReference "VRMKit" */;
+			productName = VRMKit;
+		};
+		674B63112FD5C673009EF801 /* VRMRealityKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 674B630E2FD5C673009EF801 /* XCRemoteSwiftPackageReference "VRMKit" */;
+			productName = VRMRealityKit;
+		};
+		674B63132FD5C673009EF801 /* VRMSceneKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 674B630E2FD5C673009EF801 /* XCRemoteSwiftPackageReference "VRMKit" */;
+			productName = VRMSceneKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 674B62A42FCF4261009EF801 /* Project object */;
 }

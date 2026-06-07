@@ -8,9 +8,9 @@
 //
 //  Setup (one-time, in Xcode — see AVATAR_SETUP.md):
 //    1. File ▸ Add Package Dependencies… ▸ https://github.com/tattn/VRMKit
-//       Add the products: VRMKit and VRMRealityKit to the AIGlass target.
-//    2. Export a model from VRoid Studio as VRM, rename it to `model.vrm`,
-//       and drag it into the AIGlass target (Copy if needed, target checked).
+//       Dependency Rule = Branch: `main` (VRM 1.0 + RealityKit support is on
+//       main, not yet in a tagged release). Add products VRMKit + VRMRealityKit.
+//    2. Drop a `model.vrm` into the AIGlass folder (auto-bundled).
 //
 //  Until the package is added, `canImport(VRMRealityKit)` is false and this
 //  file compiles to a lightweight placeholder so the app still builds.
@@ -52,13 +52,41 @@ struct AvatarView: View {
         ZStack {
             LinearGradient(colors: [Color(.systemIndigo).opacity(0.18), Color(.systemBackground)],
                            startPoint: .top, endPoint: .bottom)
+
             RealityView { content in
-                model.build(into: content)
+                // Soft key light so the toon materials read well off-AR.
+                let light = DirectionalLight()
+                light.light.intensity = 3000
+                light.look(at: .zero, from: SIMD3(0.4, 1.0, 1.4), relativeTo: nil)
+                content.add(light)
+
+                // Frame the head and shoulders (a "bust" shot) so it reads as a face.
+                let cam = PerspectiveCamera()
+                cam.camera.fieldOfViewInDegrees = 33
+                cam.look(at: SIMD3(0, 1.32, 0), from: SIMD3(0, 1.34, 1.05), relativeTo: nil)
+                content.add(cam)
+
+                // Load the VRM and hand it to the model for per-frame animation.
+                do {
+                    let loader = try VRMEntityLoader(named: "model.vrm")
+                    let entity = try loader.loadEntity()
+                    let facing: Float
+                    switch entity.vrm {
+                    case .v0: facing = .pi   // VRM 0.x faces away — spin to face the camera
+                    case .v1: facing = 0     // VRM 1.0 already faces the camera
+                    }
+                    entity.entity.transform.rotation = simd_quatf(angle: facing, axis: SIMD3(0, 1, 0))
+                    content.add(entity.entity)
+                    model.attach(entity, facing: facing)
+                } catch {
+                    model.errorMessage = error.localizedDescription
+                }
             }
+
             if let err = model.errorMessage {
                 AvatarSetupCard(
                     title: "アバター未設定",
-                    message: "VRoid Studio で作った model.vrm を\nアプリに追加してください。\n\(err)")
+                    message: "VRoid の model.vrm を読み込めません。\n\(err)")
             }
         }
         .onReceive(tick) { _ in
@@ -72,38 +100,14 @@ struct AvatarView: View {
 final class AvatarModel {
     var errorMessage: String?
     private var vrm: VRMEntity?
+    /// Yaw so the avatar faces the camera (set from the loaded model's version).
+    private var facing: Float = 0
     private var time: TimeInterval = 0
-    /// Yaw so the avatar faces the camera. VRM 0.x faces away (needs 180°),
-    /// VRM 1.0 already faces the camera (0). Set from the loaded model.
-    private var facing: Float = .pi
 
-    func build(into content: RealityViewContent) {
-        // Soft key light so the toon materials read well off-AR.
-        let light = DirectionalLight()
-        light.light.intensity = 3000
-        light.look(at: .zero, from: SIMD3(0.4, 1.0, 1.4), relativeTo: nil)
-        content.add(light)
-
-        // Frame the head and shoulders (a "bust" shot) so it feels like a face.
-        let cam = PerspectiveCamera()
-        cam.camera.fieldOfViewInDegrees = 33
-        cam.look(at: SIMD3(0, 1.32, 0), from: SIMD3(0, 1.34, 1.05), relativeTo: nil)
-        content.add(cam)
-
-        do {
-            let loader = try VRMEntityLoader(named: "model.vrm")
-            let entity = try loader.loadEntity()
-            switch entity.vrm {
-            case .v0: facing = .pi   // VRM 0.x faces away — spin to face the camera
-            case .v1: facing = 0     // VRM 1.0 already faces the camera
-            }
-            entity.entity.transform.rotation = simd_quatf(angle: facing, axis: SIMD3(0, 1, 0))
-            content.add(entity.entity)
-            vrm = entity
-            errorMessage = nil
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+    func attach(_ entity: VRMEntity, facing: Float) {
+        vrm = entity
+        self.facing = facing
+        errorMessage = nil
     }
 
     func update(isSpeaking: Bool) {

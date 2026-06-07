@@ -1,0 +1,15 @@
+{
+  "originHash" : "f9f9dbe0a17e74bde743894dfaae205c941ec643fc2d9af08f347926c045f447",
+  "pins" : [
+    {
+      "identity" : "vrmkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tattn/VRMKit",
+      "state" : {
+        "branch" : "main",
+        "revision" : "b42769987af4cf52522abcc6c42e3666d56ac67f"
+      }
+    }
+  ],
+  "version" : 3
+}
