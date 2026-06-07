@@ -128,14 +128,14 @@ final class AvatarModel {
         errorMessage = nil
         rootY = entity.entity.transform.translation.y
 
-        // Relax the T-pose: lower both upper arms to a natural A-pose. VRoid's
-        // mirrored bone axes mean the same local-Z rotation drops both arms.
-        let drop = simd_quatf(angle: armDrop, axis: SIMD3<Float>(0, 0, 1))
+        // Relax the T-pose: lower both upper arms to a natural A-pose. This
+        // model's arm bones are NOT mirror-symmetric, so the two sides need
+        // opposite signs around local-Z to both swing down.
         if let la = entity.humanoid.node(for: .leftUpperArm) {
-            la.transform.rotation = la.transform.rotation * drop
+            la.transform.rotation = la.transform.rotation * simd_quatf(angle: -armDrop, axis: SIMD3<Float>(0, 0, 1))
         }
         if let ra = entity.humanoid.node(for: .rightUpperArm) {
-            ra.transform.rotation = ra.transform.rotation * drop
+            ra.transform.rotation = ra.transform.rotation * simd_quatf(angle: armDrop, axis: SIMD3<Float>(0, 0, 1))
         }
 
         spine = entity.humanoid.node(for: .spine)
@@ -177,15 +177,15 @@ final class AvatarModel {
         // Tap reaction: a happy expression + quick nod + little hop.
         if reactStart >= 0 {
             let e = Float(time - reactStart)
-            let dur: Float = 1.2
+            let dur: Float = 0.8                         // snappy
             if e > dur {
                 reactStart = -1
                 vrm.setBlendShape(value: 0, for: .preset(.joy))
             } else {
                 let env = sin(.pi * (e / dur))           // 0 → 1 → 0
                 vrm.setBlendShape(value: CGFloat(env), for: .preset(.joy))
-                headPitch += env * 0.22 * sin(e * 16)    // nod
-                bob += env * 0.03                        // hop
+                headPitch += env * 0.22 * sin(e * 26)    // quick nod
+                bob += env * 0.04                        // hop
             }
         }
 
