@@ -195,13 +195,22 @@ struct CompanionView: View {
         question = ""
         thinking = true
         errorText = nil
-        let entries = allEntries()
+        let allEntriesList = allEntries()
+        let now = Date()
         Task {
-            let hits = await index.topK(query: q, entries: entries, k: topK)
-            let context = hits
+            // Narrow to a time window if the question mentions one (「昨日の」等).
+            var pool = allEntriesList
+            if let window = CompanionDates.range(from: q, now: now) {
+                let filtered = pool.filter { window.contains($0.date) }
+                if !filtered.isEmpty { pool = filtered }
+            }
+            let hits = await index.topK(query: q, entries: pool, k: topK)
+            let dateLine = "現在の日時: \(now.formatted(.dateTime.year().month().day().hour().minute()))"
+            let body = hits
                 .sorted { $0.date < $1.date }
                 .map { "\($0.date.formatted(.dateTime.month().day().hour().minute())) \($0.text)" }
                 .joined(separator: "\n")
+            let context = body.isEmpty ? dateLine : "\(dateLine)\n\n\(body)"
             do {
                 var answer = ""
                 var source = "オンデバイス"
