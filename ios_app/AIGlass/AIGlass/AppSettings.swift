@@ -37,6 +37,11 @@ final class AppSettings: ObservableObject {
     @Published var useHubForChat: Bool {
         didSet { UserDefaults.standard.set(useHubForChat, forKey: Keys.useHubForChat) }
     }
+    /// When on, the companion speaks with the 4090's VOICEVOX character voice
+    /// (when the hub is reachable), falling back to the on-device voice.
+    @Published var useHubVoice: Bool {
+        didSet { UserDefaults.standard.set(useHubVoice, forKey: Keys.useHubVoice) }
+    }
 
     init() {
         apiKey = UserDefaults.standard.string(forKey: Keys.apiKey) ?? ""
@@ -45,6 +50,7 @@ final class AppSettings: ObservableObject {
         hubURL = UserDefaults.standard.string(forKey: Keys.hubURL) ?? "http://100.76.69.64:8765"
         hubToken = UserDefaults.standard.string(forKey: Keys.hubToken) ?? ""
         useHubForChat = UserDefaults.standard.object(forKey: Keys.useHubForChat) as? Bool ?? true
+        useHubVoice = UserDefaults.standard.object(forKey: Keys.useHubVoice) as? Bool ?? true
     }
 
     var hasKey: Bool { !apiKey.isEmpty }
@@ -58,5 +64,6 @@ final class AppSettings: ObservableObject {
         static let hubURL = "hub_url"
         static let hubToken = "hub_token"
         static let useHubForChat = "use_hub_for_chat"
+        static let useHubVoice = "use_hub_voice"
     }
 }

@@ -74,7 +74,7 @@ struct CompanionView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         autoSpeak.toggle()
-                        if !autoSpeak { Speaker.shared.stop() }
+                        if !autoSpeak { stopSpeaking() }
                     } label: {
                         Image(systemName: autoSpeak ? "speaker.wave.2.fill" : "speaker.slash.fill")
                     }
@@ -159,7 +159,7 @@ struct CompanionView: View {
                     .font(.caption2)
                 }
                 HStack {
-                    Button { Speaker.shared.speak(turn.answer) } label: {
+                    Button { Task { await speak(turn.answer) } } label: {
                         Label("読み上げ", systemImage: "speaker.wave.2.fill")
                     }
                     .buttonStyle(.borderless)
@@ -193,6 +193,25 @@ struct CompanionView: View {
             entries.append(.init(id: t.id, date: t.receivedAt, text: "聞いたこと: \(t.transcript!)"))
         }
         return entries
+    }
+
+    /// Speak with the 4090's VOICEVOX voice when the hub is reachable, else
+    /// fall back to the on-device voice.
+    private func speak(_ text: String) async {
+        if settings.useHub && settings.useHubVoice && !settings.hubURL.isEmpty {
+            if let wav = try? await HubVoiceService.synthesize(
+                text: text,
+                config: .init(baseURL: settings.hubURL, token: settings.hubToken)) {
+                VoicePlayer.shared.play(wav)
+                return
+            }
+        }
+        Speaker.shared.speak(text)
+    }
+
+    private func stopSpeaking() {
+        Speaker.shared.stop()
+        VoicePlayer.shared.stop()
     }
 
     private func ask() {
@@ -237,7 +256,7 @@ struct CompanionView: View {
                 modelContext.insert(ChatTurn(question: q, answer: answer,
                                              referencedLog: context, refCount: hits.count, source: source))
                 try? modelContext.save()
-                if autoSpeak { Speaker.shared.speak(answer) }
+                if autoSpeak { await speak(answer) }
             } catch {
                 errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }

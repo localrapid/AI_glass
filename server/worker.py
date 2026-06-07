@@ -50,6 +50,12 @@ WHISPER_COMPUTE = os.environ.get("AIGLASS_WHISPER_COMPUTE", "float16")
 _whisper = None
 # Companion chat (kind='chat'): higher-quality answer than the on-device model.
 # Defaults to the vision model (works for text); set a larger/text model for more.
+# VOICEVOX (kind='tts'): character voice for the companion's replies. Run the
+# VOICEVOX engine on the 4090 (listens on :50021). Speaker IDs: 3=ずんだもん,
+# 2=四国めたん, 8=春日部つむぎ(若い女性・フランク) … see /speakers in the engine.
+VOICEVOX = _normalize(os.environ.get("VOICEVOX_URL", "http://127.0.0.1:50021"))
+VOICEVOX_SPEAKER = int(os.environ.get("AIGLASS_VOICEVOX_SPEAKER", "8"))
+VOICEVOX_SPEED = float(os.environ.get("AIGLASS_VOICEVOX_SPEED", "1.0"))
 CHAT_MODEL = os.environ.get("AIGLASS_CHAT_MODEL", MODEL)
 CHAT_SYSTEM = (
     "あなたはユーザーの生活ログを知る、親しみやすいAI相棒です。"
@@ -100,6 +106,13 @@ def _post_json(url, payload, timeout=180):
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read() or b"null")
+
+
+def _post_bytes(url, data: bytes, content_type="application/octet-stream", timeout=60):
+    headers = {"Content-Type": content_type, **AUTH}
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read()
 
 
 def caption(jpeg: bytes) -> str:
@@ -165,6 +178,24 @@ def chat(prompt: str) -> str:
     return (out.get("message", {}).get("content") or "").strip()
 
 
+def tts(text: str) -> bytes:
+    """Synthesize speech with VOICEVOX: audio_query then synthesis -> WAV bytes."""
+    import urllib.parse
+    q = urllib.parse.urlencode({"text": text, "speaker": VOICEVOX_SPEAKER})
+    # audio_query takes the text as query params and returns a query JSON.
+    req = urllib.request.Request(f"{VOICEVOX}/audio_query?{q}", method="POST")
+    with urllib.request.urlopen(req, timeout=30) as r:
+        query = json.loads(r.read())
+    query["speedScale"] = VOICEVOX_SPEED
+    body = json.dumps(query).encode()
+    req = urllib.request.Request(
+        f"{VOICEVOX}/synthesis?speaker={VOICEVOX_SPEAKER}",
+        data=body, headers={"Content-Type": "application/json"}, method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return r.read()  # WAV
+
+
 def transcribe(wav_path: str) -> str:
     model = _load_whisper()
     pp = _preprocess_wav(wav_path)
@@ -205,6 +236,11 @@ def main():
         kind = job.get("kind")
         print(f"[worker] job {jid} ({kind})")
         try:
+            if kind == "tts":
+                wav = tts(job.get("payload") or "")
+                _post_bytes(f"{HUB}/jobs/{jid}/result_audio", wav, "audio/wav")
+                print(f"[worker]   -> {len(wav)} bytes WAV")
+                continue
             if kind == "chat":
                 text = chat(job.get("payload") or "")
             elif kind == "transcribe":

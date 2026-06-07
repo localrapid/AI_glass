@@ -25,7 +25,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 import uvicorn
 
@@ -119,6 +119,27 @@ def ask(payload: dict, authorization: Optional[str] = Header(None)):
     return {"id": jid, "status": "pending"}
 
 
+@app.post("/speak")
+def speak(payload: dict, authorization: Optional[str] = Header(None)):
+    """Companion voice (kind='tts'). The iPhone sends answer text; the 4090
+    worker synthesizes it with VOICEVOX and uploads a WAV. Returns a job id the
+    app polls via GET /jobs/{id}, then downloads GET /jobs/{id}/audio."""
+    check(authorization)
+    text = (payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "empty text")
+    jid = uuid.uuid4().hex
+    now = time.time()
+    con = db()
+    con.execute(
+        "INSERT INTO jobs(id,kind,status,created,updated,result,error,payload) VALUES(?,?,?,?,?,?,?,?)",
+        (jid, "tts", "pending", now, now, None, None, text),
+    )
+    con.commit()
+    con.close()
+    return {"id": jid, "status": "pending"}
+
+
 @app.post("/jobs/{jid}/recaption")
 def recaption(jid: str, authorization: Optional[str] = Header(None)):
     """Re-queue an already-stored photo for captioning."""
@@ -168,7 +189,7 @@ def claim_next(authorization: Optional[str] = Header(None)):
     check(authorization)
     con = db()
     row = con.execute(
-        "SELECT id,kind,payload FROM jobs WHERE status='pending' AND kind IN ('caption','transcribe','chat') ORDER BY created LIMIT 1"
+        "SELECT id,kind,payload FROM jobs WHERE status='pending' AND kind IN ('caption','transcribe','chat','tts') ORDER BY created LIMIT 1"
     ).fetchone()
     if not row:
         con.close()
@@ -196,6 +217,22 @@ def get_audio(jid: str, authorization: Optional[str] = Header(None)):
     if not p.exists():
         raise HTTPException(404, "no audio")
     return FileResponse(p, media_type="audio/wav")
+
+
+@app.post("/jobs/{jid}/result_audio")
+async def post_result_audio(jid: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Worker uploads synthesized WAV bytes (raw body) for a 'tts' job."""
+    check(authorization)
+    data = await request.body()
+    (MEDIA / f"{jid}.wav").write_bytes(data)
+    con = db()
+    con.execute(
+        "UPDATE jobs SET status='done',result=?,updated=? WHERE id=?",
+        ("(audio)", time.time(), jid),
+    )
+    con.commit()
+    con.close()
+    return {"ok": True, "bytes": len(data)}
 
 
 @app.post("/jobs/{jid}/result")

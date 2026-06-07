@@ -309,6 +309,7 @@ private struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Toggle("相棒の回答も4090で高品質化（家にいる時）", isOn: $settings.useHubForChat)
+                        Toggle("相棒の声を4090のVOICEVOXにする（家にいる時）", isOn: $settings.useHubVoice)
                     }
                 } else {
                     Section("Claude API キー") {

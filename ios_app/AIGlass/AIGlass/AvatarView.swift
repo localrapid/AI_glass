@@ -45,7 +45,6 @@ import VRMKit
 import VRMRealityKit
 
 struct AvatarView: View {
-    @ObservedObject private var speaker = Speaker.shared
     @State private var model = AvatarModel()
     private let tick = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common).autoconnect()
 
@@ -92,7 +91,7 @@ struct AvatarView: View {
             }
         }
         .onReceive(tick) { _ in
-            model.update(isSpeaking: speaker.isSpeaking)
+            model.update()
         }
     }
 }
@@ -151,7 +150,7 @@ final class AvatarModel {
         reactStart = time
     }
 
-    func update(isSpeaking: Bool) {
+    func update() {
         guard let vrm else { return }
         let dt = 1.0 / 60.0
         time += dt
@@ -201,9 +200,11 @@ final class AvatarModel {
 
         vrm.entity.transform.translation.y = rootY + bob
 
-        // Lip-sync: open/close the mouth while speaking (faster than before).
-        let mouth: CGFloat = isSpeaking ? CGFloat(max(0, sin(t * 20)) * 0.85) : 0
-        vrm.setBlendShape(value: mouth, for: .preset(.a))
+        // Lip-sync: prefer the real voice envelope (VOICEVOX from the 4090);
+        // fall back to a wiggle while the on-device voice is speaking.
+        let voiceLevel = VoicePlayer.shared.level
+        let sine: CGFloat = Speaker.shared.isSpeaking ? CGFloat(max(0, sin(t * 20)) * 0.85) : 0
+        vrm.setBlendShape(value: max(voiceLevel, sine), for: .preset(.a))
 
         // Blink: a brief close roughly every 4 seconds.
         let blinkPhase = time.truncatingRemainder(dividingBy: 4.0)
