@@ -51,6 +51,11 @@ def db() -> sqlite3.Connection:
                error TEXT
            )"""
     )
+    # payload holds the prompt text for kind='chat' jobs (added later).
+    try:
+        con.execute("ALTER TABLE jobs ADD COLUMN payload TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     return con
 
 
@@ -91,6 +96,27 @@ async def create_job(
     con.commit()
     con.close()
     return {"id": jid, "status": status}
+
+
+@app.post("/ask")
+def ask(payload: dict, authorization: Optional[str] = Header(None)):
+    """Companion chat (kind='chat'). The iPhone sends a question + already-
+    retrieved lifelog context; the 4090 worker generates the answer with the
+    big model. Returns a job id the app polls via GET /jobs/{id}."""
+    check(authorization)
+    question = (payload.get("question") or "").strip()
+    context = (payload.get("context") or "").strip()
+    prompt = f"# これまでのログ\n{context if context else '（記録なし）'}\n\n# 質問\n{question}"
+    jid = uuid.uuid4().hex
+    now = time.time()
+    con = db()
+    con.execute(
+        "INSERT INTO jobs(id,kind,status,created,updated,result,error,payload) VALUES(?,?,?,?,?,?,?,?)",
+        (jid, "chat", "pending", now, now, None, None, prompt),
+    )
+    con.commit()
+    con.close()
+    return {"id": jid, "status": "pending"}
 
 
 @app.post("/jobs/{jid}/recaption")
@@ -142,16 +168,16 @@ def claim_next(authorization: Optional[str] = Header(None)):
     check(authorization)
     con = db()
     row = con.execute(
-        "SELECT id,kind FROM jobs WHERE status='pending' AND kind IN ('caption','transcribe') ORDER BY created LIMIT 1"
+        "SELECT id,kind,payload FROM jobs WHERE status='pending' AND kind IN ('caption','transcribe','chat') ORDER BY created LIMIT 1"
     ).fetchone()
     if not row:
         con.close()
         return {}
-    jid, kind = row
+    jid, kind, payload = row
     con.execute("UPDATE jobs SET status='processing',updated=? WHERE id=?", (time.time(), jid))
     con.commit()
     con.close()
-    return {"id": jid, "kind": kind}
+    return {"id": jid, "kind": kind, "payload": payload}
 
 
 @app.get("/jobs/{jid}/image")

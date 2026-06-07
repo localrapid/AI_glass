@@ -12,7 +12,7 @@ import SwiftData
 
 struct ContentView: View {
     @StateObject private var ble = BLEManager()
-    @StateObject private var settings = AppSettings()
+    @ObservedObject var settings: AppSettings
     @State private var showSettings = false
 
     @Environment(\.modelContext) private var modelContext
@@ -308,6 +308,7 @@ private struct SettingsView: View {
                         Text("M1ハブのTailscaleアドレス。iPhoneもTailscaleに接続している必要があります。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        Toggle("相棒の回答も4090で高品質化（家にいる時）", isOn: $settings.useHubForChat)
                     }
                 } else {
                     Section("Claude API キー") {
@@ -428,5 +429,5 @@ private struct PhotoImageView: View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(settings: AppSettings())
 }

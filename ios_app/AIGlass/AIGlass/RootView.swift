@@ -8,11 +8,13 @@
 import SwiftUI
 
 struct RootView: View {
+    @StateObject private var settings = AppSettings()
+
     var body: some View {
         TabView {
-            ContentView()
+            ContentView(settings: settings)
                 .tabItem { Label("グラス", systemImage: "eyeglasses") }
-            CompanionView()
+            CompanionView(settings: settings)
                 .tabItem { Label("相棒", systemImage: "bubble.left.and.bubble.right.fill") }
         }
     }

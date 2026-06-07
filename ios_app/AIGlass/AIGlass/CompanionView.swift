@@ -11,6 +11,8 @@ import SwiftUI
 import SwiftData
 
 struct CompanionView: View {
+    @ObservedObject var settings: AppSettings
+
     @Query(sort: \PhotoRecord.receivedAt, order: .reverse) private var photos: [PhotoRecord]
     @Query(sort: \TranscriptRecord.receivedAt, order: .reverse) private var transcripts: [TranscriptRecord]
 
@@ -156,6 +158,10 @@ struct CompanionView: View {
                     .buttonStyle(.borderless)
                     .font(.caption2)
                     Spacer()
+                    if let src = turn.source {
+                        Text(src == "4090" ? "via 4090" : "via 端末")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
                     Text(turn.createdAt.formatted(.dateTime.month().day().hour().minute()))
                         .font(.caption2).foregroundStyle(.tertiary)
                 }
@@ -197,10 +203,25 @@ struct CompanionView: View {
                 .map { "\($0.date.formatted(.dateTime.month().day().hour().minute())) \($0.text)" }
                 .joined(separator: "\n")
             do {
-                let a = try await CompanionBrain.answer(question: q, context: context)
-                modelContext.insert(ChatTurn(question: q, answer: a, referencedLog: context, refCount: hits.count))
+                var answer = ""
+                var source = "オンデバイス"
+                // At home (hub reachable) use the 4090's bigger model; otherwise
+                // fall back to the on-device model.
+                if settings.useHub && settings.useHubForChat && !settings.hubURL.isEmpty {
+                    if let hub = try? await HubChatService.ask(
+                        question: q, context: context,
+                        config: .init(baseURL: settings.hubURL, token: settings.hubToken)) {
+                        answer = hub
+                        source = "4090"
+                    }
+                }
+                if answer.isEmpty {
+                    answer = try await CompanionBrain.answer(question: q, context: context)
+                }
+                modelContext.insert(ChatTurn(question: q, answer: answer,
+                                             referencedLog: context, refCount: hits.count, source: source))
                 try? modelContext.save()
-                if autoSpeak { Speaker.shared.speak(a) }
+                if autoSpeak { Speaker.shared.speak(answer) }
             } catch {
                 errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }

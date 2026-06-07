@@ -48,6 +48,15 @@ WHISPER_MODEL = os.environ.get("AIGLASS_WHISPER_MODEL", "large-v3")
 WHISPER_DEVICE = os.environ.get("AIGLASS_WHISPER_DEVICE", "cuda")
 WHISPER_COMPUTE = os.environ.get("AIGLASS_WHISPER_COMPUTE", "float16")
 _whisper = None
+# Companion chat (kind='chat'): higher-quality answer than the on-device model.
+# Defaults to the vision model (works for text); set a larger/text model for more.
+CHAT_MODEL = os.environ.get("AIGLASS_CHAT_MODEL", MODEL)
+CHAT_SYSTEM = (
+    "あなたはユーザーの生活ログを知る、親しみやすいAI相棒です。"
+    "日本語で、話し言葉で、簡潔に答えてください。"
+    "与えられたログ（各行の先頭に日時）だけを根拠にし、分かれば「いつのことか」も添えてください。"
+    "ログに無いことは推測せず「記録には無いみたい」と正直に答えてください。"
+)
 
 AUTH = {"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}
 
@@ -141,6 +150,21 @@ def _preprocess_wav(path: str) -> str:
     return op
 
 
+def chat(prompt: str) -> str:
+    out = _post_json(
+        f"{OLLAMA}/api/chat",
+        {
+            "model": CHAT_MODEL,
+            "messages": [
+                {"role": "system", "content": CHAT_SYSTEM},
+                {"role": "user", "content": prompt},
+            ],
+            "stream": False,
+        },
+    )
+    return (out.get("message", {}).get("content") or "").strip()
+
+
 def transcribe(wav_path: str) -> str:
     model = _load_whisper()
     pp = _preprocess_wav(wav_path)
@@ -181,7 +205,9 @@ def main():
         kind = job.get("kind")
         print(f"[worker] job {jid} ({kind})")
         try:
-            if kind == "transcribe":
+            if kind == "chat":
+                text = chat(job.get("payload") or "")
+            elif kind == "transcribe":
                 wav = _get_bytes(f"{HUB}/jobs/{jid}/audio")
                 tmp = os.path.join(tempfile.gettempdir(), f"aiglass_{jid}.wav")
                 with open(tmp, "wb") as f:
