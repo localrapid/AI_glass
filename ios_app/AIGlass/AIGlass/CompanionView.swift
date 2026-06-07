@@ -18,6 +18,8 @@ struct CompanionView: View {
     @Query(sort: \ChatTurn.createdAt) private var turns: [ChatTurn]
 
     @State private var index = CompanionIndex()
+    @StateObject private var speech = SpeechInput()
+    @State private var autoSpeak = true
     @State private var question = ""
     @State private var thinking = false
     @State private var errorText: String?
@@ -60,6 +62,14 @@ struct CompanionView: View {
             }
             .navigationTitle("相棒")
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        autoSpeak.toggle()
+                        if !autoSpeak { Speaker.shared.stop() }
+                    } label: {
+                        Image(systemName: autoSpeak ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                    }
+                }
                 if !turns.isEmpty {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button(role: .destructive) {
@@ -70,6 +80,16 @@ struct CompanionView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) { inputBar }
+            .onAppear { speech.requestAuthorization() }
+            .onChange(of: speech.transcript) { _, t in
+                if speech.isRecording { question = t }
+            }
+            .onChange(of: speech.isRecording) { wasRecording, isRecording in
+                if wasRecording && !isRecording
+                    && !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    ask()
+                }
+            }
         }
     }
 
@@ -87,7 +107,14 @@ struct CompanionView: View {
                 }
             }
             HStack(alignment: .bottom) {
-                TextField("相棒に聞いてみる", text: $question, axis: .vertical)
+                Button { speech.toggle() } label: {
+                    Image(systemName: speech.isRecording ? "stop.circle.fill" : "mic.fill")
+                }
+                .buttonStyle(.bordered)
+                .tint(speech.isRecording ? .red : .accentColor)
+                .disabled(thinking || !CompanionBrain.isAvailable)
+
+                TextField(speech.isRecording ? "聞いています…" : "相棒に聞いてみる", text: $question, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...4)
                 Button { ask() } label: { Image(systemName: "paperplane.fill") }
@@ -122,8 +149,16 @@ struct CompanionView: View {
                     }
                     .font(.caption2)
                 }
-                Text(turn.createdAt.formatted(.dateTime.month().day().hour().minute()))
-                    .font(.caption2).foregroundStyle(.tertiary)
+                HStack {
+                    Button { Speaker.shared.speak(turn.answer) } label: {
+                        Label("読み上げ", systemImage: "speaker.wave.2.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption2)
+                    Spacer()
+                    Text(turn.createdAt.formatted(.dateTime.month().day().hour().minute()))
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
@@ -164,6 +199,7 @@ struct CompanionView: View {
                 let a = try await CompanionBrain.answer(question: q, context: context)
                 modelContext.insert(ChatTurn(question: q, answer: a, referencedLog: context, refCount: hits.count))
                 try? modelContext.save()
+                if autoSpeak { Speaker.shared.speak(a) }
             } catch {
                 errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
