@@ -13,6 +13,7 @@ import AVFoundation
 final class Speaker {
     static let shared = Speaker()
     private let synth = AVSpeechSynthesizer()
+    private lazy var voice: AVSpeechSynthesisVoice? = Self.bestJapaneseVoice()
 
     func speak(_ text: String) {
         guard !text.isEmpty else { return }
@@ -23,12 +24,33 @@ final class Speaker {
         try? session.setActive(true)
 
         let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "ja-JP")
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        utterance.voice = voice
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate     // natural pace
+        utterance.pitchMultiplier = 1.08                        // slightly younger / brighter
         synth.speak(utterance)
     }
 
     func stop() {
         if synth.isSpeaking { synth.stopSpeaking(at: .immediate) }
+    }
+
+    /// Pick the most natural Japanese voice available: prefer premium > enhanced
+    /// quality, and a female voice (e.g. Kyoko / O-ren). Falls back to the
+    /// default ja-JP voice if no high-quality voice is installed.
+    private static func bestJapaneseVoice() -> AVSpeechSynthesisVoice? {
+        let japanese = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("ja") }
+        func score(_ v: AVSpeechSynthesisVoice) -> Int {
+            var s = 0
+            switch v.quality {
+            case .premium: s += 100
+            case .enhanced: s += 50
+            default: break
+            }
+            if v.gender == .female { s += 10 }
+            let id = (v.identifier + " " + v.name).lowercased()
+            if id.contains("kyoko") || id.contains("o-ren") || id.contains("oren") { s += 5 }
+            return s
+        }
+        return japanese.max { score($0) < score($1) } ?? AVSpeechSynthesisVoice(language: "ja-JP")
     }
 }

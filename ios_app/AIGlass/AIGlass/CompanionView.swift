@@ -183,8 +183,9 @@ struct CompanionView: View {
     }
 
     private func ask() {
+        if speech.isRecording { speech.stop() }   // tapping send also ends dictation
         let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return }
+        guard !q.isEmpty, !thinking else { return }
         question = ""
         thinking = true
         errorText = nil
