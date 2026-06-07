@@ -8,12 +8,20 @@
 
 import Foundation
 import AVFoundation
+import Combine
 
 @MainActor
-final class Speaker {
+final class Speaker: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     static let shared = Speaker()
+    /// True while an utterance is being spoken — drives the avatar's lip-sync.
+    @Published private(set) var isSpeaking = false
     private let synth = AVSpeechSynthesizer()
     private lazy var voice: AVSpeechSynthesisVoice? = Self.bestJapaneseVoice()
+
+    private override init() {
+        super.init()
+        synth.delegate = self
+    }
 
     func speak(_ text: String) {
         guard !text.isEmpty else { return }
@@ -52,5 +60,16 @@ final class Speaker {
             return s
         }
         return japanese.max { score($0) < score($1) } ?? AVSpeechSynthesisVoice(language: "ja-JP")
+    }
+
+    // MARK: - AVSpeechSynthesizerDelegate (drives lip-sync)
+    nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.isSpeaking = true }
+    }
+    nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.isSpeaking = false }
+    }
+    nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.isSpeaking = false }
     }
 }

@@ -31,7 +31,12 @@ struct CompanionView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            VStack(spacing: 0) {
+                AvatarView()
+                    .frame(height: 240)
+                    .clipped()
+                Divider()
+                ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if let msg = CompanionBrain.availabilityMessage {
                         Label(msg, systemImage: "exclamationmark.triangle.fill")
@@ -61,8 +66,10 @@ struct CompanionView: View {
                     }
                 }
                 .padding()
+                }
             }
             .navigationTitle("相棒")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
