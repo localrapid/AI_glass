@@ -14,21 +14,16 @@ struct CompanionView: View {
     @Query(sort: \PhotoRecord.receivedAt, order: .reverse) private var photos: [PhotoRecord]
     @Query(sort: \TranscriptRecord.receivedAt, order: .reverse) private var transcripts: [TranscriptRecord]
 
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \ChatTurn.createdAt) private var turns: [ChatTurn]
+
     @State private var index = CompanionIndex()
-    @State private var turns: [Turn] = []
     @State private var question = ""
     @State private var thinking = false
     @State private var errorText: String?
 
     private let samples = ["今日は何を見た？", "最近どんなことを話してた？", "あれ、どこに置いたっけ？"]
     private let topK = 8
-
-    struct Turn: Identifiable {
-        let id = UUID()
-        let q: String
-        let a: String
-        let refs: Int
-    }
 
     var body: some View {
         NavigationStack {
@@ -64,6 +59,16 @@ struct CompanionView: View {
                 .padding()
             }
             .navigationTitle("相棒")
+            .toolbar {
+                if !turns.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(role: .destructive) {
+                            for t in turns { modelContext.delete(t) }
+                            try? modelContext.save()
+                        } label: { Image(systemName: "trash") }
+                    }
+                }
+            }
             .safeAreaInset(edge: .bottom) { inputBar }
         }
     }
@@ -96,18 +101,29 @@ struct CompanionView: View {
         .background(.bar)
     }
 
-    private func turnView(_ turn: Turn) -> some View {
+    private func turnView(_ turn: ChatTurn) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(turn.q)
+            Text(turn.question)
                 .font(.callout.bold())
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(10)
                 .background(.tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
-            VStack(alignment: .leading, spacing: 4) {
-                Text(turn.a)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(turn.answer)
                     .font(.body).textSelection(.enabled)
-                Text("参照ログ \(turn.refs)件")
-                    .font(.caption2).foregroundStyle(.secondary)
+                if turn.refCount > 0 {
+                    DisclosureGroup("参照したログ \(turn.refCount)件") {
+                        Text(turn.referencedLog)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 4)
+                    }
+                    .font(.caption2)
+                }
+                Text(turn.createdAt.formatted(.dateTime.month().day().hour().minute()))
+                    .font(.caption2).foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
@@ -146,7 +162,8 @@ struct CompanionView: View {
                 .joined(separator: "\n")
             do {
                 let a = try await CompanionBrain.answer(question: q, context: context)
-                turns.append(Turn(q: q, a: a, refs: hits.count))
+                modelContext.insert(ChatTurn(question: q, answer: a, referencedLog: context, refCount: hits.count))
+                try? modelContext.save()
             } catch {
                 errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
