@@ -321,6 +321,12 @@ private struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                Section("相棒") {
+                    Toggle("相棒からの自発的な声かけ通知", isOn: $settings.proactiveEnabled)
+                    Text("最近のログから、たわいもない一言を日中に数回お知らせします（端末内で生成・オフライン）。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Section("AI説明") {
                     Toggle("受信ごとに自動で説明を生成", isOn: $settings.autoCaption)
                     Text("ONにすると写真1枚ごとに推論します。連続撮影中は負荷/費用が積み上がるため、まずはOFF＋手動生成を推奨。")

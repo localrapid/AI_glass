@@ -42,6 +42,10 @@ final class AppSettings: ObservableObject {
     @Published var useHubVoice: Bool {
         didSet { UserDefaults.standard.set(useHubVoice, forKey: Keys.useHubVoice) }
     }
+    /// When on, the companion sends occasional casual check-in notifications.
+    @Published var proactiveEnabled: Bool {
+        didSet { UserDefaults.standard.set(proactiveEnabled, forKey: Keys.proactiveEnabled) }
+    }
 
     init() {
         apiKey = UserDefaults.standard.string(forKey: Keys.apiKey) ?? ""
@@ -51,6 +55,7 @@ final class AppSettings: ObservableObject {
         hubToken = UserDefaults.standard.string(forKey: Keys.hubToken) ?? ""
         useHubForChat = UserDefaults.standard.object(forKey: Keys.useHubForChat) as? Bool ?? true
         useHubVoice = UserDefaults.standard.object(forKey: Keys.useHubVoice) as? Bool ?? true
+        proactiveEnabled = UserDefaults.standard.object(forKey: Keys.proactiveEnabled) as? Bool ?? true
     }
 
     var hasKey: Bool { !apiKey.isEmpty }
@@ -65,5 +70,6 @@ final class AppSettings: ObservableObject {
         static let hubToken = "hub_token"
         static let useHubForChat = "use_hub_for_chat"
         static let useHubVoice = "use_hub_voice"
+        static let proactiveEnabled = "proactive_enabled"
     }
 }

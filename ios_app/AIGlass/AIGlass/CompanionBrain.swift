@@ -59,4 +59,23 @@ enum CompanionBrain {
         let response = try await session.respond(to: prompt)
         return response.content
     }
+
+    /// A short, casual one-liner the companion can push as a notification —
+    /// grounded in recent lifelog context when available ("たわいもないこと").
+    static func remark(context: String) async throws -> String {
+        guard isAvailable else { throw BrainError.unavailable }
+
+        let instructions = """
+        あなたはユーザーの親しい相棒です。LINEで送るような、ごく短い一言を1つだけ作ってください。
+        条件: 日本語・タメ口でフランク・20〜35文字程度・絵文字は0〜1個。
+        最近のログ（各行の先頭に日時）があれば、それに軽く触れて気にかける一言にする。
+        無ければ時間帯に合った何気ない声かけにする。説明や前置きは不要、一言だけ出力。
+        """
+        let session = LanguageModelSession(instructions: instructions)
+        let prompt = context.isEmpty
+            ? "最近のログはありません。何気ない一言をどうぞ。"
+            : "# 最近のログ\n\(context)\n\n上記を踏まえた、たわいもない一言を1つ。"
+        let response = try await session.respond(to: prompt)
+        return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }
