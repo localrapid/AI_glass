@@ -219,6 +219,14 @@ def main():
         print("[worker] ollama models:", [m.get("name") for m in tags.get("models", [])])
     except Exception as e:
         print("[worker] WARNING: cannot reach Ollama:", e)
+    # Probe VOICEVOX too so a 'tts' job doesn't fail mysteriously later.
+    try:
+        ver = _get_json(f"{VOICEVOX}/version", timeout=3)
+        print(f"[worker] voicevox at {VOICEVOX} ok (version {ver}), speaker={VOICEVOX_SPEAKER}")
+    except Exception as e:
+        print(f"[worker] WARNING: cannot reach VOICEVOX at {VOICEVOX}: {e}")
+        print("[worker]   (TTS jobs will fail. Is the engine running and reachable from HERE?")
+        print("[worker]    WSL↔Windows localhost differ — try VOICEVOX_URL=http://<windows-ip>:50021)")
 
     while True:
         try:
