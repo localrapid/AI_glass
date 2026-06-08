@@ -25,20 +25,29 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
         center.setNotificationCategories([category])
     }
 
+    // Completion-handler (non-async) variants on purpose: the async variants
+    // would make the system await this on the main thread while a MainActor hop
+    // also waits for that thread → a launch deadlock (whole screen stays black
+    // when cold-launched from a tapped notification). Here we return immediately
+    // and schedule the state update without blocking.
+
     // Show companion pings even while the app is in the foreground.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification
-    ) async -> UNNotificationPresentationOptions {
-        [.banner, .sound]
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
     }
 
     // Tapping a ping → continue the conversation in the chat screen.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse
-    ) async {
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
         let ping = response.notification.request.content.body
-        await MainActor.run { AppRouter.shared.incomingPing = ping }
+        Task { @MainActor in AppRouter.shared.incomingPing = ping }
+        completionHandler()
     }
 }
