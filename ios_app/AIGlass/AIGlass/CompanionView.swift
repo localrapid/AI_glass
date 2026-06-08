@@ -26,6 +26,10 @@ struct CompanionView: View {
     @State private var question = ""
     @State private var thinking = false
     @State private var errorText: String?
+    @ObservedObject private var router = AppRouter.shared
+    /// A companion check-in ("何してる？") shown as an incoming message; the next
+    /// send replies to it (conversation continues in-chat).
+    @State private var pendingPing: String?
 
     private let samples = ["今日は何を見た？", "最近どんなことを話してた？", "あれ、どこに置いたっけ？"]
     private let topK = 8
@@ -52,6 +56,10 @@ struct CompanionView: View {
 
                     ForEach(turns) { turn in
                         turnView(turn)
+                    }
+
+                    if let ping = pendingPing {
+                        pingBubble(ping)
                     }
 
                     if thinking {
@@ -90,7 +98,8 @@ struct CompanionView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) { inputBar }
-            .onAppear { speech.requestAuthorization() }
+            .onAppear { speech.requestAuthorization(); adoptIncomingPing() }
+            .onChange(of: router.incomingPing) { _, _ in adoptIncomingPing() }
             .onChange(of: speech.transcript) { _, t in
                 if speech.isRecording { question = t }
             }
@@ -124,7 +133,7 @@ struct CompanionView: View {
                 .tint(speech.isRecording ? .red : .accentColor)
                 .disabled(thinking || !CompanionBrain.isAvailable)
 
-                TextField(speech.isRecording ? "聞いています…" : "相棒に聞いてみる", text: $question, axis: .vertical)
+                TextField(speech.isRecording ? "聞いています…" : (pendingPing != nil ? "返信する…" : "相棒に聞いてみる"), text: $question, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...4)
                 Button { ask() } label: { Image(systemName: "paperplane.fill") }
@@ -218,6 +227,60 @@ struct CompanionView: View {
         VoicePlayer.shared.stop()
     }
 
+    /// Pull a tapped notification's ping into the chat as an incoming message.
+    private func adoptIncomingPing() {
+        if let p = router.incomingPing {
+            pendingPing = p
+            router.incomingPing = nil
+        }
+    }
+
+    /// The companion's incoming check-in bubble; the user replies from the input.
+    private func pingBubble(_ ping: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(ping)
+                .font(.body)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+            HStack {
+                Label("相棒からの声かけ — 下の欄から返信してね", systemImage: "bubble.left.fill")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Button("やめる") { pendingPing = nil }
+                    .font(.caption2).buttonStyle(.borderless)
+            }
+        }
+    }
+
+    /// Reply to a check-in: save the reply as a learnable memo, generate the
+    /// companion's curious follow-up on-device, and show it as the next ping.
+    private func replyToPing(_ ping: String, _ text: String) {
+        let context = recentContextString()
+        Task {
+            let followUp = (try? await CompanionBrain.followUp(ping: ping, reply: text, context: context))
+                ?? "なるほど〜！それで、どんな感じ？"
+            modelContext.insert(MemoRecord(text: text))
+            modelContext.insert(ChatTurn(question: text, answer: followUp,
+                                         referencedLog: "（相棒の声かけ）\(ping)", refCount: 0, source: "オンデバイス"))
+            try? modelContext.save()
+            pendingPing = followUp               // continue the conversation in-chat
+            if autoSpeak { await speak(followUp) }
+            thinking = false
+        }
+    }
+
+    /// Recent (last 24h) lifelog + memos, for grounding a follow-up.
+    private func recentContextString() -> String {
+        let since = Date().addingTimeInterval(-24 * 3600)
+        return allEntries()
+            .filter { $0.date > since }
+            .sorted { $0.date < $1.date }
+            .suffix(8)
+            .map { "\($0.date.formatted(.dateTime.month().day().hour().minute())) \($0.text)" }
+            .joined(separator: "\n")
+    }
+
     private func ask() {
         if speech.isRecording { speech.stop() }   // tapping send also ends dictation
         let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -225,6 +288,13 @@ struct CompanionView: View {
         question = ""
         thinking = true
         errorText = nil
+        // If a companion check-in is pending, treat this as a reply to it and
+        // keep the conversation going in-chat.
+        if let ping = pendingPing {
+            pendingPing = nil
+            replyToPing(ping, q)
+            return
+        }
         let allEntriesList = allEntries()
         let now = Date()
         Task {

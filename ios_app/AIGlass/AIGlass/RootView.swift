@@ -29,7 +29,13 @@ struct RootView: View {
                 .tabItem { Label("相棒", systemImage: "bubble.left.and.bubble.right.fill") }
                 .tag(1)
         }
-        .onAppear { ProactiveNotifier.requestAuthorization() }
+        .onAppear {
+            ProactiveNotifier.requestAuthorization()
+            if router.incomingPing != nil { router.selectedTab = 1 }   // launched from a ping
+        }
+        .onChange(of: router.incomingPing) { _, ping in
+            if ping != nil { router.selectedTab = 1 }                  // tapped while running
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { scheduleProactive() }
         }

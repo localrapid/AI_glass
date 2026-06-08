@@ -14,4 +14,6 @@ final class AppRouter: ObservableObject {
     static let shared = AppRouter()
     /// 0 = グラス, 1 = 相棒
     @Published var selectedTab = 0
+    /// A tapped companion ping to continue in the chat (consumed by CompanionView).
+    @Published var incomingPing: String?
 }
