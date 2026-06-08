@@ -58,7 +58,10 @@ struct CompanionView: View {
                         turnView(turn)
                     }
 
-                    if let ping = pendingPing {
+                    // Show the incoming bubble only for a fresh check-in; once
+                    // the user has replied, the follow-up is already shown as the
+                    // latest turn's answer (avoid the duplicate companion bubble).
+                    if let ping = pendingPing, turns.last?.answer != ping {
                         pingBubble(ping)
                     }
 
