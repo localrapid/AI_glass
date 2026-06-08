@@ -31,10 +31,10 @@ struct RootView: View {
         }
         .onAppear {
             ProactiveNotifier.requestAuthorization()
-            if router.incomingPing != nil { router.selectedTab = 1 }   // launched from a ping
+            if router.incomingPing != nil { switchToCompanionSoon() }   // launched from a ping
         }
         .onChange(of: router.incomingPing) { _, ping in
-            if ping != nil { router.selectedTab = 1 }                  // tapped while running
+            if ping != nil { switchToCompanionSoon() }                  // tapped while running
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { scheduleProactive() }
@@ -43,6 +43,16 @@ struct RootView: View {
         // effect without needing another active transition).
         .onChange(of: settings.proactiveEnabled) { _, _ in scheduleProactive() }
         .onChange(of: settings.proactiveTestMode) { _, _ in scheduleProactive() }
+    }
+
+    /// Switch to 相棒 only after the UI has settled. Switching to the avatar tab
+    /// synchronously during a cold launch (from a tapped notification) can leave
+    /// the screen black; a short defer lets the TabView/RealityView initialize.
+    private func switchToCompanionSoon() {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            router.selectedTab = 1
+        }
     }
 
     private func scheduleProactive() {
