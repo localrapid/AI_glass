@@ -46,6 +46,10 @@ final class AppSettings: ObservableObject {
     @Published var proactiveEnabled: Bool {
         didSet { UserDefaults.standard.set(proactiveEnabled, forKey: Keys.proactiveEnabled) }
     }
+    /// Test mode: schedule the check-ins at 5/10/15 min instead of 2.5/5/8 h.
+    @Published var proactiveTestMode: Bool {
+        didSet { UserDefaults.standard.set(proactiveTestMode, forKey: Keys.proactiveTestMode) }
+    }
 
     init() {
         apiKey = UserDefaults.standard.string(forKey: Keys.apiKey) ?? ""
@@ -56,6 +60,7 @@ final class AppSettings: ObservableObject {
         useHubForChat = UserDefaults.standard.object(forKey: Keys.useHubForChat) as? Bool ?? true
         useHubVoice = UserDefaults.standard.object(forKey: Keys.useHubVoice) as? Bool ?? true
         proactiveEnabled = UserDefaults.standard.object(forKey: Keys.proactiveEnabled) as? Bool ?? true
+        proactiveTestMode = UserDefaults.standard.object(forKey: Keys.proactiveTestMode) as? Bool ?? false
     }
 
     var hasKey: Bool { !apiKey.isEmpty }
@@ -71,5 +76,6 @@ final class AppSettings: ObservableObject {
         static let useHubForChat = "use_hub_for_chat"
         static let useHubVoice = "use_hub_voice"
         static let proactiveEnabled = "proactive_enabled"
+        static let proactiveTestMode = "proactive_test_mode"
     }
 }

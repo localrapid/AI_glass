@@ -27,12 +27,19 @@ struct RootView: View {
         }
         .onAppear { ProactiveNotifier.requestAuthorization() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
-                let recent = recentLines()
-                let enabled = settings.proactiveEnabled
-                Task { await ProactiveNotifier.reschedule(recent: recent, enabled: enabled) }
-            }
+            if phase == .active { scheduleProactive() }
         }
+        // Re-schedule immediately when the toggles change (so test mode takes
+        // effect without needing another active transition).
+        .onChange(of: settings.proactiveEnabled) { _, _ in scheduleProactive() }
+        .onChange(of: settings.proactiveTestMode) { _, _ in scheduleProactive() }
+    }
+
+    private func scheduleProactive() {
+        let recent = recentLines()
+        let enabled = settings.proactiveEnabled
+        let testMode = settings.proactiveTestMode
+        Task { await ProactiveNotifier.reschedule(recent: recent, enabled: enabled, testMode: testMode) }
     }
 
     /// Recent (last 24h) lifelog lines, date-prefixed and chronological.

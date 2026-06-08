@@ -326,6 +326,12 @@ private struct SettingsView: View {
                     Text("最近のログから、たわいもない一言を日中に数回お知らせします（端末内で生成・オフライン）。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if settings.proactiveEnabled {
+                        Toggle("（テスト）5・10・15分後に通知", isOn: $settings.proactiveTestMode)
+                        Text("ONにしてこの画面を閉じ、アプリをホームに戻す（バックグラウンド）と、5/10/15分後に届きます。確認後はOFFに。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section("AI説明") {
                     Toggle("受信ごとに自動で説明を生成", isOn: $settings.autoCaption)

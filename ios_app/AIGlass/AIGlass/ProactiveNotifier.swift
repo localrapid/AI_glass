@@ -26,9 +26,10 @@ enum ProactiveNotifier {
         center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    /// Regenerate and (re)schedule a few casual check-ins over the coming
-    /// daytime hours. `recent` is recent lifelog lines (date-prefixed).
-    static func reschedule(recent: [String], enabled: Bool) async {
+    /// Regenerate and (re)schedule a few casual check-ins. Normally they land in
+    /// the coming daytime hours; in `testMode` they fire at 5/10/15 minutes so
+    /// the behavior can be verified quickly. `recent` is date-prefixed lifelog.
+    static func reschedule(recent: [String], enabled: Bool, testMode: Bool = false) async {
         // Clear our previously-scheduled pings.
         let pending = await center.pendingNotificationRequests()
         let ours = pending.map(\.identifier).filter { $0.hasPrefix(idPrefix) }
@@ -38,16 +39,20 @@ enum ProactiveNotifier {
         let settings = await center.notificationSettings()
         guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
 
-        for (i, fireDate) in upcomingSlots(count: 3).enumerated() {
+        let triggers: [UNNotificationTrigger] = testMode
+            ? [5, 10, 15].map { UNTimeIntervalNotificationTrigger(timeInterval: Double($0) * 60, repeats: false) }
+            : upcomingSlots(count: 3).map {
+                let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: $0)
+                return UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+            }
+
+        for (i, trigger) in triggers.enumerated() {
             let context = recent.shuffled().prefix(4).joined(separator: "\n")
             let body = (try? await CompanionBrain.remark(context: context)) ?? fallback()
             let content = UNMutableNotificationContent()
-            content.title = "相棒"
+            content.title = testMode ? "相棒（テスト）" : "相棒"
             content.body = body
             content.sound = .default
-
-            let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
-            let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
             let req = UNNotificationRequest(identifier: idPrefix + String(i), content: content, trigger: trigger)
             try? await center.add(req)
         }
