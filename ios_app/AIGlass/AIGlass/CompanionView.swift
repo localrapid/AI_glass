@@ -15,6 +15,7 @@ struct CompanionView: View {
 
     @Query(sort: \PhotoRecord.receivedAt, order: .reverse) private var photos: [PhotoRecord]
     @Query(sort: \TranscriptRecord.receivedAt, order: .reverse) private var transcripts: [TranscriptRecord]
+    @Query(sort: \MemoRecord.createdAt, order: .reverse) private var memos: [MemoRecord]
 
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \ChatTurn.createdAt) private var turns: [ChatTurn]
@@ -191,6 +192,9 @@ struct CompanionView: View {
         }
         for t in transcripts where (t.transcript?.isEmpty == false) {
             entries.append(.init(id: t.id, date: t.receivedAt, text: "聞いたこと: \(t.transcript!)"))
+        }
+        for m in memos where !m.text.isEmpty {
+            entries.append(.init(id: m.id, date: m.createdAt, text: "話したこと: \(m.text)"))
         }
         return entries
     }

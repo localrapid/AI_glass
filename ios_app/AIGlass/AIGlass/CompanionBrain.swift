@@ -78,4 +78,32 @@ enum CompanionBrain {
         let response = try await session.respond(to: prompt)
         return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    /// Continue the conversation: the companion pinged with `ping`, the user
+    /// replied `reply`; produce the companion's next line — a warm reaction plus
+    /// a natural, curious follow-up question (so it keeps learning about them).
+    static func followUp(ping: String, reply: String, context: String) async throws -> String {
+        guard isAvailable else { throw BrainError.unavailable }
+
+        let instructions = """
+        あなたはユーザーの親しい相棒です。あなたの声かけにユーザーが返事をくれました。
+        それへの短い返事を1つ作ってください。
+        条件: 日本語・タメ口でフランク・1〜2文・絵文字は0〜1個。
+        相手に興味を持って、自然な深掘りの質問を1つ添える（例: 何の本？どこで？楽しい？）。
+        最近のログがあれば軽く踏まえてOK。説明や前置きは不要、セリフだけ出力。
+        """
+        let session = LanguageModelSession(instructions: instructions)
+        let prompt = """
+        # 最近のログ
+        \(context.isEmpty ? "（なし）" : context)
+
+        # あなたの声かけ
+        \(ping)
+
+        # ユーザーの返事
+        \(reply)
+        """
+        let response = try await session.respond(to: prompt)
+        return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }

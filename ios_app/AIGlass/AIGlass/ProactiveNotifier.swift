@@ -53,6 +53,7 @@ enum ProactiveNotifier {
             content.title = testMode ? "相棒（テスト）" : "相棒"
             content.body = body
             content.sound = .default
+            content.categoryIdentifier = NotificationCoordinator.categoryID  // repliable
             let req = UNNotificationRequest(identifier: idPrefix + String(i), content: content, trigger: trigger)
             try? await center.add(req)
         }
