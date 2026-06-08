@@ -46,6 +46,11 @@ import VRMRealityKit
 
 struct AvatarView: View {
     @State private var model = AvatarModel()
+    /// Mount the RealityView only after the view is on screen. RealityKit can
+    /// render black if its view is created during a programmatic tab switch /
+    /// cold launch (e.g. opening 相棒 from a tapped notification); deferring a
+    /// frame avoids that.
+    @State private var mounted = false
     private let tick = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -53,6 +58,7 @@ struct AvatarView: View {
             LinearGradient(colors: [Color(.systemIndigo).opacity(0.18), Color(.systemBackground)],
                            startPoint: .top, endPoint: .bottom)
 
+            if mounted {
             RealityView { content in
                 // Soft key light so the toon materials read well off-AR.
                 let light = DirectionalLight()
@@ -83,6 +89,7 @@ struct AvatarView: View {
             }
             .contentShape(Rectangle())
             .onTapGesture { model.react() }
+            }
 
             if let err = model.errorMessage {
                 AvatarSetupCard(
@@ -90,8 +97,9 @@ struct AvatarView: View {
                     message: "VRoid の model.vrm を読み込めません。\n\(err)")
             }
         }
+        .task { mounted = true }
         .onReceive(tick) { _ in
-            model.update()
+            if mounted { model.update() }
         }
     }
 }
